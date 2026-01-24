@@ -22,9 +22,11 @@ public class BannerBrosModule : MBSubModuleBase
     public BannerBrosConfig Config { get; private set; } = new();
     public PlayerManager PlayerManager { get; private set; } = null!;
     public WorldStateManager WorldStateManager { get; private set; } = null!;
+    public SessionManager SessionManager { get; private set; } = null!;
 
     public bool IsHost { get; private set; }
     public bool IsConnected { get; private set; }
+    public SessionState SessionState => SessionManager?.State ?? SessionState.Disconnected;
 
     protected override void OnSubModuleLoad()
     {
@@ -34,6 +36,7 @@ public class BannerBrosModule : MBSubModuleBase
         Config = BannerBrosConfig.Load();
         PlayerManager = new PlayerManager();
         WorldStateManager = new WorldStateManager();
+        SessionManager = new SessionManager(PlayerManager, WorldStateManager);
 
         InitializeHarmony();
 
@@ -58,6 +61,7 @@ public class BannerBrosModule : MBSubModuleBase
     {
         base.OnSubModuleUnloaded();
 
+        SessionManager?.Cleanup();
         _harmony?.UnpatchAll(HarmonyId);
         Config.Save();
         Instance = null;
@@ -68,8 +72,15 @@ public class BannerBrosModule : MBSubModuleBase
     protected override void OnBeforeInitialModuleScreenSetAsRoot()
     {
         base.OnBeforeInitialModuleScreenSetAsRoot();
-        // Initialize UI components here
+        // Notify other modules that core is ready
+        OnCoreModuleReady?.Invoke();
     }
+
+    /// <summary>
+    /// Event fired when core module is fully initialized.
+    /// Other modules can subscribe to this to know when to wire up dependencies.
+    /// </summary>
+    public static event Action? OnCoreModuleReady;
 
     protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
     {
@@ -105,6 +116,8 @@ public class BannerBrosModule : MBSubModuleBase
     {
         IsHost = true;
         NetworkManager.Instance?.StartHost(port, Config.MaxPlayers);
+        SessionManager.Initialize();
+        SessionManager.StartHostSession();
         IsConnected = true;
         LogMessage($"Hosting session on port {port}");
     }
@@ -112,6 +125,7 @@ public class BannerBrosModule : MBSubModuleBase
     public void JoinSession(string address, int port = 7777)
     {
         IsHost = false;
+        SessionManager.Initialize();
         NetworkManager.Instance?.Connect(address, port);
         IsConnected = true;
         LogMessage($"Joining session at {address}:{port}");
@@ -120,6 +134,8 @@ public class BannerBrosModule : MBSubModuleBase
     public void Disconnect()
     {
         NetworkManager.Instance?.Disconnect();
+        SessionManager.Cleanup();
+        PlayerManager.Clear();
         IsConnected = false;
         IsHost = false;
         LogMessage("Disconnected from session");

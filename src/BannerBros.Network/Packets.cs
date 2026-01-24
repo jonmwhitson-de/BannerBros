@@ -145,3 +145,105 @@ public enum SessionEventType
     SessionSaving,
     SessionSaved
 }
+
+/// <summary>
+/// Packet sent by client when requesting to join a session.
+/// </summary>
+public class JoinRequestPacket
+{
+    public string PlayerName { get; set; } = "";
+    public string ModVersion { get; set; } = "";
+    public bool HasExistingCharacter { get; set; }
+    public string? CharacterData { get; set; } // Serialized character if rejoining
+}
+
+/// <summary>
+/// Response from host to a join request.
+/// </summary>
+public class JoinResponsePacket
+{
+    public bool Accepted { get; set; }
+    public string? RejectionReason { get; set; }
+    public int AssignedPlayerId { get; set; }
+    public string? WorldStateData { get; set; } // Serialized essential world state
+    public List<ConnectedPlayerInfo> ExistingPlayers { get; set; } = new();
+    public bool RequiresCharacterCreation { get; set; }
+}
+
+public class ConnectedPlayerInfo
+{
+    public int NetworkId { get; set; }
+    public string Name { get; set; } = "";
+    public string? HeroId { get; set; }
+    public string? ClanId { get; set; }
+    public string? KingdomId { get; set; }
+    public float MapX { get; set; }
+    public float MapY { get; set; }
+    public bool IsHost { get; set; }
+}
+
+/// <summary>
+/// Packet containing new character data from a joining player.
+/// </summary>
+public class CharacterCreationPacket
+{
+    public int PlayerId { get; set; }
+    public string CharacterName { get; set; } = "";
+    public string CultureId { get; set; } = "";
+    public bool IsFemale { get; set; }
+
+    // Appearance
+    public string? BodyPropertiesData { get; set; }
+
+    // Starting attributes/skills (simplified for network)
+    public int StartingAge { get; set; } = 25;
+    public Dictionary<string, int> Attributes { get; set; } = new();
+    public Dictionary<string, int> Skills { get; set; } = new();
+    public Dictionary<string, int> Perks { get; set; } = new();
+
+    // Equipment loadout
+    public List<string> EquipmentIds { get; set; } = new();
+}
+
+/// <summary>
+/// Response to character creation, confirms hero was spawned.
+/// </summary>
+public class CharacterCreationResponsePacket
+{
+    public int PlayerId { get; set; }
+    public bool Success { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? HeroId { get; set; }
+    public string? PartyId { get; set; }
+    public string? ClanId { get; set; }
+    public float SpawnX { get; set; }
+    public float SpawnY { get; set; }
+}
+
+/// <summary>
+/// Full state sync packet sent periodically or on demand.
+/// Contains comprehensive state for late joiners.
+/// </summary>
+public class FullStateSyncPacket
+{
+    public long CampaignTimeTicks { get; set; }
+    public int Season { get; set; }
+    public int Year { get; set; }
+    public float TimeMultiplier { get; set; }
+
+    // All connected players
+    public List<PlayerStatePacket> PlayerStates { get; set; } = new();
+
+    // Active battles that players might want to join
+    public List<BattleInfo> ActiveBattles { get; set; } = new();
+
+    // Key kingdom/faction state (wars, truces)
+    public List<DiplomacyState> DiplomacyStates { get; set; } = new();
+}
+
+public class DiplomacyState
+{
+    public string Faction1Id { get; set; } = "";
+    public string Faction2Id { get; set; } = "";
+    public int RelationType { get; set; } // War, Peace, Alliance
+}

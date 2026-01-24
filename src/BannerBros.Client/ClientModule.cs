@@ -32,6 +32,58 @@ public class ClientModule : MBSubModuleBase
         MapMarkers = new PlayerMapMarkers();
 
         InitializeHarmony();
+
+        // Subscribe to session events after core module loads
+        SubscribeToSessionEvents();
+    }
+
+    private void SubscribeToSessionEvents()
+    {
+        // Subscribe to core module ready event
+        BannerBrosModule.OnCoreModuleReady += OnCoreModuleReady;
+    }
+
+    public void OnCoreModuleReady()
+    {
+        var sessionManager = BannerBrosModule.Instance?.SessionManager;
+        if (sessionManager != null)
+        {
+            sessionManager.OnCharacterCreationRequired += OnCharacterCreationRequired;
+            sessionManager.OnPlayerSpawned += OnPlayerSpawned;
+            sessionManager.OnJoinRejected += OnJoinRejected;
+        }
+    }
+
+    private void OnCharacterCreationRequired()
+    {
+        BannerBrosModule.LogMessage("Character creation required - opening creator");
+        CharacterCreationUI.Show();
+    }
+
+    private void OnPlayerSpawned(CoopPlayer player)
+    {
+        if (player.NetworkId == BannerBrosModule.Instance?.PlayerManager.LocalPlayerId)
+        {
+            BannerBrosModule.LogMessage($"Your character {player.Name} has spawned!");
+            // TODO: Transition to campaign map view at spawn location
+        }
+    }
+
+    private void OnJoinRejected(string reason)
+    {
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Cannot Join",
+                $"Failed to join session:\n{reason}",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
     }
 
     private void InitializeHarmony()
@@ -50,6 +102,15 @@ public class ClientModule : MBSubModuleBase
     protected override void OnSubModuleUnloaded()
     {
         base.OnSubModuleUnloaded();
+
+        // Unsubscribe from session events
+        var sessionManager = BannerBrosModule.Instance?.SessionManager;
+        if (sessionManager != null)
+        {
+            sessionManager.OnCharacterCreationRequired -= OnCharacterCreationRequired;
+            sessionManager.OnPlayerSpawned -= OnPlayerSpawned;
+            sessionManager.OnJoinRejected -= OnJoinRejected;
+        }
 
         _harmony?.UnpatchAll(HarmonyId);
         MapMarkers.Cleanup();

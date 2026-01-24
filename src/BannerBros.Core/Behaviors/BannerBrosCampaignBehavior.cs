@@ -1,4 +1,9 @@
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Conversation;
+using BannerBros.Network;
+using LiteNetLib;
 
 namespace BannerBros.Core;
 
@@ -7,6 +12,15 @@ namespace BannerBros.Core;
 /// </summary>
 public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 {
+    private float _syncTimer;
+    private float _worldSyncTimer;
+    private const float SyncInterval = 0.1f; // 10 times per second
+    private const float WorldSyncInterval = 1.0f; // Once per second
+
+    private float _lastX;
+    private float _lastY;
+    private PlayerState _lastState;
+
     public override void RegisterEvents()
     {
         CampaignEvents.OnSessionLaunchedEvent.AddNonSerializedListener(this, OnSessionLaunched);
@@ -18,86 +32,167 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
     public override void SyncData(IDataStore dataStore)
     {
         // Sync co-op specific data with save game
+        // This is called when saving/loading - we track player IDs for reconnection
     }
 
     private void OnSessionLaunched(CampaignGameStarter starter)
     {
         BannerBrosModule.LogMessage("Campaign session started");
+        _syncTimer = 0;
+        _worldSyncTimer = 0;
     }
 
     private void OnTick(float dt)
     {
-        // Called every frame during campaign
-        // Sync player positions and states
-        SyncPlayerStates(dt);
-    }
+        var module = BannerBrosModule.Instance;
+        if (module?.IsConnected != true) return;
 
-    private void OnHourlyTick()
-    {
-        // Sync world state every in-game hour
-        if (BannerBrosModule.Instance?.IsConnected == true)
+        // Accumulate time
+        _syncTimer += dt;
+        _worldSyncTimer += dt;
+
+        // Sync player states at fixed interval
+        if (_syncTimer >= SyncInterval)
         {
+            _syncTimer = 0;
+            SyncLocalPlayerState();
+        }
+
+        // Host syncs world state less frequently
+        if (module.IsHost && _worldSyncTimer >= WorldSyncInterval)
+        {
+            _worldSyncTimer = 0;
             SyncWorldState();
         }
     }
 
-    private void OnDailyTick()
+    private void OnHourlyTick()
     {
-        // Daily sync for less frequent data
+        // Additional hourly sync for less time-critical data
+        var module = BannerBrosModule.Instance;
+        if (module?.IsHost != true) return;
+
+        // Host broadcasts comprehensive world state update
+        BroadcastFullWorldSync();
     }
 
-    private void SyncPlayerStates(float dt)
+    private void OnDailyTick()
+    {
+        // Daily sync for diplomacy changes, etc.
+    }
+
+    private void SyncLocalPlayerState()
     {
         var module = BannerBrosModule.Instance;
         if (module?.IsConnected != true) return;
 
-        // Get local player's current state
         var localPlayer = module.PlayerManager.GetLocalPlayer();
         if (localPlayer == null) return;
 
-        // Update position from main party
-        var mainParty = Campaign.Current?.MainParty;
+        // Get current state
+        var mainParty = MobileParty.MainParty;
+        float currentX = localPlayer.MapPositionX;
+        float currentY = localPlayer.MapPositionY;
+        var currentState = localPlayer.State;
+
         if (mainParty != null)
         {
             var pos = mainParty.Position2D;
-            localPlayer.MapPositionX = pos.X;
-            localPlayer.MapPositionY = pos.Y;
-
-            // Send position update to other players
-            // NetworkManager handles throttling
+            currentX = pos.X;
+            currentY = pos.Y;
+            localPlayer.MapPositionX = currentX;
+            localPlayer.MapPositionY = currentY;
+            localPlayer.PartyId = mainParty.StringId;
         }
 
-        // Check and update player state
-        UpdateLocalPlayerState(localPlayer);
+        // Determine current state
+        currentState = DeterminePlayerState();
+        localPlayer.State = currentState;
+
+        // Update hero/clan info if available
+        if (Hero.MainHero != null)
+        {
+            localPlayer.HeroId = Hero.MainHero.StringId;
+            localPlayer.ClanId = Hero.MainHero.Clan?.StringId;
+            localPlayer.KingdomId = Hero.MainHero.Clan?.Kingdom?.StringId;
+        }
+
+        // Only send if something changed (delta compression)
+        bool positionChanged = Math.Abs(currentX - _lastX) > 0.01f || Math.Abs(currentY - _lastY) > 0.01f;
+        bool stateChanged = currentState != _lastState;
+
+        if (positionChanged || stateChanged)
+        {
+            _lastX = currentX;
+            _lastY = currentY;
+            _lastState = currentState;
+
+            SendPlayerStateUpdate(localPlayer, mainParty);
+        }
     }
 
-    private void UpdateLocalPlayerState(CoopPlayer player)
+    private void SendPlayerStateUpdate(CoopPlayer player, MobileParty? party)
     {
-        // Determine current state based on game context
-        var newState = DeterminePlayerState();
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null || !networkManager.IsRunning) return;
 
-        if (player.State != newState)
+        var packet = new PlayerStatePacket
         {
-            player.State = newState;
-            // Notify network of state change
+            PlayerId = player.NetworkId,
+            PlayerName = player.Name,
+            MapX = player.MapPositionX,
+            MapY = player.MapPositionY,
+            State = (int)player.State,
+            HeroId = player.HeroId,
+            PartyId = player.PartyId,
+            ClanId = player.ClanId,
+            KingdomId = player.KingdomId,
+            PartySize = party?.MemberRoster?.TotalManCount ?? 0,
+            PartySpeed = party?.Speed ?? 0,
+            IsInBattle = player.CurrentBattleId != null,
+            BattleId = player.CurrentBattleId
+        };
+
+        // Send with unreliable delivery for frequent position updates (reduces latency)
+        if (networkManager.IsHost)
+        {
+            // Host sends to all clients
+            networkManager.Send(packet, DeliveryMethod.Sequenced);
+        }
+        else
+        {
+            // Client sends to server
+            networkManager.SendToServer(packet, DeliveryMethod.Sequenced);
         }
     }
 
     private PlayerState DeterminePlayerState()
     {
-        // Check various game states to determine player's current state
-        // This integrates with Bannerlord's state system
-
         if (Campaign.Current == null)
             return PlayerState.OnMap;
 
-        // Check if in battle
+        // Check if in battle/mission
         if (Mission.Current != null)
             return PlayerState.InBattle;
 
-        // Check if in dialogue - would check ConversationManager
-        // Check if in trade - would check trade screen state
-        // Check if in town/village/castle - would check settlement state
+        // Check if in dialogue
+        if (Campaign.Current.ConversationManager?.IsConversationInProgress == true)
+            return PlayerState.InDialogue;
+
+        // Check if in settlement
+        var currentSettlement = Settlement.CurrentSettlement;
+        if (currentSettlement != null)
+        {
+            if (currentSettlement.IsTown)
+                return PlayerState.InTown;
+            if (currentSettlement.IsVillage)
+                return PlayerState.InVillage;
+            if (currentSettlement.IsCastle)
+                return PlayerState.InCastle;
+        }
+
+        // Check if in trade screen (this would need specific state checking)
+        // For now, we assume if we're not in any of the above, we're on the map
 
         return PlayerState.OnMap;
     }
@@ -105,12 +200,107 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
     private void SyncWorldState()
     {
         var module = BannerBrosModule.Instance;
-        if (module?.IsHost != true) return;
+        var networkManager = NetworkManager.Instance;
 
-        // Host broadcasts world state updates
-        var worldState = module.WorldStateManager;
-        worldState.UpdateServerTime(CampaignTime.Now);
+        if (module?.IsHost != true || networkManager == null) return;
 
-        // Broadcast to all clients
+        // Update server time
+        module.WorldStateManager.UpdateServerTime(CampaignTime.Now);
+
+        // Send lightweight world sync
+        var packet = new WorldSyncPacket
+        {
+            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            TimeMultiplier = module.Config.TimeSpeedMultiplier,
+            Season = (int)CampaignTime.Now.GetSeasonOfYear,
+            DayOfSeason = CampaignTime.Now.GetDayOfSeason
+        };
+
+        // Add active battles
+        foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
+        {
+            packet.ActiveBattles.Add(new BattleInfo
+            {
+                BattleId = battle.BattleId,
+                MapPosition = battle.MapPosition,
+                InitiatorPlayerId = battle.InitiatorPlayerId,
+                AttackerPlayerIds = battle.GetPlayersOnSide(BattleSide.Attacker).ToList(),
+                DefenderPlayerIds = battle.GetPlayersOnSide(BattleSide.Defender).ToList()
+            });
+        }
+
+        networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
+    }
+
+    private void BroadcastFullWorldSync()
+    {
+        var module = BannerBrosModule.Instance;
+        var networkManager = NetworkManager.Instance;
+
+        if (module?.IsHost != true || networkManager == null) return;
+
+        var packet = new FullStateSyncPacket
+        {
+            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            Year = CampaignTime.Now.GetYear,
+            Season = (int)CampaignTime.Now.GetSeasonOfYear,
+            TimeMultiplier = module.Config.TimeSpeedMultiplier
+        };
+
+        // Add all player states
+        foreach (var player in module.PlayerManager.Players.Values)
+        {
+            packet.PlayerStates.Add(new PlayerStatePacket
+            {
+                PlayerId = player.NetworkId,
+                PlayerName = player.Name,
+                MapX = player.MapPositionX,
+                MapY = player.MapPositionY,
+                State = (int)player.State,
+                HeroId = player.HeroId,
+                PartyId = player.PartyId,
+                ClanId = player.ClanId,
+                KingdomId = player.KingdomId,
+                IsInBattle = player.CurrentBattleId != null,
+                BattleId = player.CurrentBattleId
+            });
+        }
+
+        // Add active battles
+        foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
+        {
+            packet.ActiveBattles.Add(new BattleInfo
+            {
+                BattleId = battle.BattleId,
+                MapPosition = battle.MapPosition,
+                InitiatorPlayerId = battle.InitiatorPlayerId
+            });
+        }
+
+        // Add diplomacy states (wars, alliances)
+        if (Campaign.Current?.Kingdoms != null)
+        {
+            foreach (var kingdom1 in Campaign.Current.Kingdoms)
+            {
+                foreach (var kingdom2 in Campaign.Current.Kingdoms)
+                {
+                    if (kingdom1.StringId.CompareTo(kingdom2.StringId) < 0) // Avoid duplicates
+                    {
+                        var stance = kingdom1.GetStanceWith(kingdom2);
+                        if (stance.IsAtWar || stance.IsAllied)
+                        {
+                            packet.DiplomacyStates.Add(new DiplomacyState
+                            {
+                                Faction1Id = kingdom1.StringId,
+                                Faction2Id = kingdom2.StringId,
+                                RelationType = stance.IsAtWar ? 1 : (stance.IsAllied ? 2 : 0)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
     }
 }

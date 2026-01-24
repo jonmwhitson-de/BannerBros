@@ -69,10 +69,11 @@ BannerLordMod/
     │   ├── BannerBrosConfig.cs      # JSON settings persistence
     │   ├── PlayerManager.cs         # Connected player tracking
     │   ├── WorldStateManager.cs     # Battle instances, time sync
+    │   ├── SessionManager.cs        # ★ NEW: Join flow, character spawning
     │   ├── Behaviors/
-    │   │   ├── BannerBrosCampaignBehavior.cs
+    │   │   ├── BannerBrosCampaignBehavior.cs  # ★ UPDATED: Full network sync
     │   │   ├── TimeControlBehavior.cs
-    │   │   ├── BattleJoinBehavior.cs
+    │   │   ├── BattleJoinBehavior.cs          # ★ UPDATED: Network events
     │   │   └── PlayerProtectionBehavior.cs
     │   └── Patches/
     │       ├── TimeControlPatches.cs    # Block pause/speed UI
@@ -80,17 +81,18 @@ BannerLordMod/
     │       └── BattlePatches.cs         # Battle start/join/end hooks
     ├── BannerBros.Network/          # Networking layer
     │   ├── NetworkModule.cs
-    │   ├── NetworkManager.cs        # LiteNetLib host/client
-    │   ├── MessageHandler.cs        # Packet dispatch
-    │   └── Packets.cs               # All network message types
+    │   ├── NetworkManager.cs        # ★ UPDATED: SendToServer, message routing
+    │   ├── MessageHandler.cs        # ★ UPDATED: All session packet handlers
+    │   └── Packets.cs               # ★ UPDATED: Join/character creation packets
     └── BannerBros.Client/           # UI and input
-        ├── ClientModule.cs          # Input handling, Harmony init
+        ├── ClientModule.cs          # ★ UPDATED: Session event handling
         ├── CoopMenuManager.cs       # (stub)
         ├── PlayerHUDManager.cs
         ├── Patches/
         │   └── MainMenuPatches.cs   # Inject Host/Join buttons
         └── UI/
             ├── MainMenuExtension.cs # Host/Join dialogs
+            ├── CharacterCreationUI.cs  # ★ NEW: Joining player character creation
             └── PlayerMapMarkers.cs  # Show players on campaign map
 ```
 
@@ -128,20 +130,22 @@ Remote: origin -> https://github.com/jonmwhitson-de/BannerBros.git (NOT PUSHED)
 ## What Is NOT Yet Implemented
 
 ### High Priority (MVP blockers)
-1. **Save/Load synchronization** - When a player joins an existing campaign, their character needs to be created/loaded
-2. **Player character creation flow** - New players joining need to create a character
-3. **Actual network message sending** - The sync loops in behaviors call NetworkManager but the integration to actually send player positions/states each tick is stubbed
-4. **Testing** - No tests, never been compiled against real game
+1. ~~**Save/Load synchronization**~~ ✅ DONE - SessionManager handles join flow
+2. ~~**Player character creation flow**~~ ✅ DONE - CharacterCreationUI for joining players
+3. ~~**Actual network message sending**~~ ✅ DONE - BannerBrosCampaignBehavior sends position/state updates
+4. **Testing** - No tests, never been compiled against real game. This is the critical next step!
 
 ### Medium Priority
-1. **Trading UI** - Player-to-player trade window
+1. **Trading UI** - Player-to-player trade window (packets exist)
 2. **Chat system** - Packets exist but no UI
-3. **Proper map markers** - PlayerMapMarkers.cs is scaffolded but needs real Bannerlord scene integration
+3. **Proper map markers** - PlayerMapMarkers.cs needs real Bannerlord scene integration
+4. **Battle joining integration** - TransitionToBattle() needs Bannerlord MapEvent integration
 
 ### Lower Priority
 1. **Server browser / LAN discovery**
 2. **Mod compatibility layer**
 3. **Spectator mode on death**
+4. **Reconnection with existing character**
 
 ---
 
@@ -207,6 +211,32 @@ Automatic on push - uses NuGet reference assemblies.
    - See each other on the map
    - Not crash
 
+### Recent Changes (2026-01-24)
+The following systems were implemented in this session:
+
+1. **SessionManager** (`src/BannerBros.Core/SessionManager.cs`)
+   - Full join flow: client connects → sends JoinRequest → host validates → sends JoinResponse
+   - Character creation: client creates character → host spawns hero/party → confirms to client
+   - State management: tracks SessionState (Disconnected, Joining, CharacterCreation, InSession)
+
+2. **Network Packets** (`src/BannerBros.Network/Packets.cs`)
+   - Added: JoinRequestPacket, JoinResponsePacket, CharacterCreationPacket, CharacterCreationResponsePacket, FullStateSyncPacket
+   - Added: ConnectedPlayerInfo, DiplomacyState
+
+3. **Character Creation UI** (`src/BannerBros.Client/UI/CharacterCreationUI.cs`)
+   - Simple inquiry-based UI for name, gender, culture selection
+   - Submits CharacterCreationPacket to host via SessionManager
+
+4. **Network Sync** (`src/BannerBros.Core/Behaviors/BannerBrosCampaignBehavior.cs`)
+   - Sends PlayerStatePacket at 10Hz with delta compression (only when position/state changes)
+   - Host sends WorldSyncPacket at 1Hz with time and battle info
+   - Host sends FullStateSyncPacket hourly with comprehensive state
+
+5. **Battle Events** (`src/BannerBros.Core/Behaviors/BattleJoinBehavior.cs`)
+   - Sends BattleEventPacket when starting/joining/ending battles
+   - Other players can see battles on map and join them
+
 ---
 
 *Document created: 2026-01-24*
+*Last updated: 2026-01-24*

@@ -1,0 +1,718 @@
+using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Core;
+using TaleWorlds.Library;
+using TaleWorlds.ObjectSystem;
+using BannerBros.Network;
+
+namespace BannerBros.Core;
+
+/// <summary>
+/// Manages multiplayer session state including join flow, player spawning,
+/// and synchronization between host and clients.
+/// </summary>
+public class SessionManager
+{
+    public const string ModVersion = "0.1.0";
+
+    private readonly PlayerManager _playerManager;
+    private readonly WorldStateManager _worldStateManager;
+
+    private int _nextPlayerId = 1; // 0 is reserved for host
+    private SessionState _state = SessionState.Disconnected;
+    private bool _awaitingCharacterCreation;
+
+    public SessionState State => _state;
+    public bool IsAwaitingCharacterCreation => _awaitingCharacterCreation;
+
+    public event Action<SessionState>? OnStateChanged;
+    public event Action<string>? OnJoinRejected;
+    public event Action? OnCharacterCreationRequired;
+    public event Action<CoopPlayer>? OnPlayerSpawned;
+
+    public SessionManager(PlayerManager playerManager, WorldStateManager worldStateManager)
+    {
+        _playerManager = playerManager;
+        _worldStateManager = worldStateManager;
+    }
+
+    public void Initialize()
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null) return;
+
+        // Subscribe to network events
+        networkManager.Messages.OnJoinRequestReceived += HandleJoinRequest;
+        networkManager.Messages.OnJoinResponseReceived += HandleJoinResponse;
+        networkManager.Messages.OnCharacterCreationReceived += HandleCharacterCreation;
+        networkManager.Messages.OnCharacterCreationResponseReceived += HandleCharacterCreationResponse;
+        networkManager.Messages.OnFullStateSyncReceived += HandleFullStateSync;
+        networkManager.Messages.OnPlayerStateReceived += HandlePlayerStateUpdate;
+        networkManager.Messages.OnSessionEventReceived += HandleSessionEvent;
+
+        networkManager.OnPeerConnected += OnPeerConnected;
+        networkManager.OnPeerDisconnected += OnPeerDisconnected;
+    }
+
+    public void Cleanup()
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null) return;
+
+        networkManager.Messages.OnJoinRequestReceived -= HandleJoinRequest;
+        networkManager.Messages.OnJoinResponseReceived -= HandleJoinResponse;
+        networkManager.Messages.OnCharacterCreationReceived -= HandleCharacterCreation;
+        networkManager.Messages.OnCharacterCreationResponseReceived -= HandleCharacterCreationResponse;
+        networkManager.Messages.OnFullStateSyncReceived -= HandleFullStateSync;
+        networkManager.Messages.OnPlayerStateReceived -= HandlePlayerStateUpdate;
+        networkManager.Messages.OnSessionEventReceived -= HandleSessionEvent;
+
+        networkManager.OnPeerConnected -= OnPeerConnected;
+        networkManager.OnPeerDisconnected -= OnPeerDisconnected;
+    }
+
+    #region Host Methods
+
+    /// <summary>
+    /// Called on host when starting a new session.
+    /// </summary>
+    public void StartHostSession()
+    {
+        SetState(SessionState.InSession);
+
+        // Add host as player 0
+        var hostPlayer = new CoopPlayer
+        {
+            NetworkId = 0,
+            Name = BannerBrosModule.Instance?.Config.PlayerName ?? "Host",
+            IsHost = true,
+            State = PlayerState.OnMap
+        };
+
+        // Link host to the main hero
+        if (Hero.MainHero != null)
+        {
+            hostPlayer.HeroId = Hero.MainHero.StringId;
+            hostPlayer.ClanId = Hero.MainHero.Clan?.StringId;
+            hostPlayer.KingdomId = Hero.MainHero.Clan?.Kingdom?.StringId;
+
+            if (MobileParty.MainParty != null)
+            {
+                hostPlayer.PartyId = MobileParty.MainParty.StringId;
+                var pos = MobileParty.MainParty.Position2D;
+                hostPlayer.MapPositionX = pos.X;
+                hostPlayer.MapPositionY = pos.Y;
+            }
+        }
+
+        _playerManager.LocalPlayerId = 0;
+        _playerManager.AddPlayer(hostPlayer);
+    }
+
+    private void HandleJoinRequest(JoinRequestPacket packet, int peerId)
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null || !networkManager.IsHost) return;
+
+        BannerBrosModule.LogMessage($"Processing join request from {packet.PlayerName}");
+
+        // Validate version
+        if (packet.ModVersion != ModVersion)
+        {
+            SendJoinResponse(peerId, false, $"Version mismatch. Host: {ModVersion}, Client: {packet.ModVersion}");
+            return;
+        }
+
+        // Check player limit
+        if (_playerManager.PlayerCount >= (BannerBrosModule.Instance?.Config.MaxPlayers ?? 4))
+        {
+            SendJoinResponse(peerId, false, "Server is full");
+            return;
+        }
+
+        // Assign player ID
+        var playerId = _nextPlayerId++;
+
+        // Check if this is a returning player with existing character
+        bool requiresCharacterCreation = !packet.HasExistingCharacter;
+
+        // Build response with current world state
+        var response = new JoinResponsePacket
+        {
+            Accepted = true,
+            AssignedPlayerId = playerId,
+            RequiresCharacterCreation = requiresCharacterCreation,
+            ExistingPlayers = GetConnectedPlayerInfos()
+        };
+
+        // Send response
+        networkManager.SendTo(peerId, response);
+
+        // Create player entry (not fully initialized until character is created/loaded)
+        var player = new CoopPlayer
+        {
+            NetworkId = playerId,
+            Name = packet.PlayerName,
+            IsHost = false,
+            State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
+        };
+
+        _playerManager.AddPlayer(player);
+
+        // Notify other players
+        BroadcastPlayerJoined(player);
+
+        // Send full state sync
+        SendFullStateSync(peerId);
+    }
+
+    private void SendJoinResponse(int peerId, bool accepted, string? rejectionReason = null)
+    {
+        var response = new JoinResponsePacket
+        {
+            Accepted = accepted,
+            RejectionReason = rejectionReason
+        };
+
+        NetworkManager.Instance?.SendTo(peerId, response);
+    }
+
+    private List<ConnectedPlayerInfo> GetConnectedPlayerInfos()
+    {
+        var infos = new List<ConnectedPlayerInfo>();
+
+        foreach (var player in _playerManager.Players.Values)
+        {
+            infos.Add(new ConnectedPlayerInfo
+            {
+                NetworkId = player.NetworkId,
+                Name = player.Name,
+                HeroId = player.HeroId,
+                ClanId = player.ClanId,
+                KingdomId = player.KingdomId,
+                MapX = player.MapPositionX,
+                MapY = player.MapPositionY,
+                IsHost = player.IsHost
+            });
+        }
+
+        return infos;
+    }
+
+    private void SendFullStateSync(int peerId)
+    {
+        var packet = new FullStateSyncPacket
+        {
+            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f
+        };
+
+        // Add all player states
+        foreach (var player in _playerManager.Players.Values)
+        {
+            packet.PlayerStates.Add(CreatePlayerStatePacket(player));
+        }
+
+        // Add active battles
+        foreach (var battle in _worldStateManager.ActiveBattles.Values)
+        {
+            packet.ActiveBattles.Add(new BattleInfo
+            {
+                BattleId = battle.BattleId,
+                MapPosition = battle.MapPosition,
+                InitiatorPlayerId = battle.InitiatorPlayerId
+            });
+        }
+
+        NetworkManager.Instance?.SendTo(peerId, packet);
+    }
+
+    private void HandleCharacterCreation(CharacterCreationPacket packet, int peerId)
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null || !networkManager.IsHost) return;
+
+        BannerBrosModule.LogMessage($"Processing character creation for player {packet.PlayerId}: {packet.CharacterName}");
+
+        var player = _playerManager.GetPlayer(packet.PlayerId);
+        if (player == null)
+        {
+            SendCharacterCreationResponse(peerId, packet.PlayerId, false, "Player not found");
+            return;
+        }
+
+        try
+        {
+            // Spawn the new hero and party
+            var result = SpawnPlayerHero(packet, player);
+
+            if (result.Success)
+            {
+                player.HeroId = result.HeroId;
+                player.PartyId = result.PartyId;
+                player.ClanId = result.ClanId;
+                player.MapPositionX = result.SpawnX;
+                player.MapPositionY = result.SpawnY;
+                player.State = PlayerState.OnMap;
+
+                SendCharacterCreationResponse(peerId, packet.PlayerId, true, null,
+                    result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+
+                // Notify all players of the new hero
+                BroadcastPlayerStateUpdate(player);
+            }
+            else
+            {
+                SendCharacterCreationResponse(peerId, packet.PlayerId, false, result.ErrorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Character creation failed: {ex.Message}");
+            SendCharacterCreationResponse(peerId, packet.PlayerId, false, $"Error: {ex.Message}");
+        }
+    }
+
+    private SpawnResult SpawnPlayerHero(CharacterCreationPacket packet, CoopPlayer player)
+    {
+        if (Campaign.Current == null)
+        {
+            return new SpawnResult { Success = false, ErrorMessage = "No active campaign" };
+        }
+
+        try
+        {
+            // Get the culture
+            var culture = MBObjectManager.Instance.GetObject<CultureObject>(packet.CultureId);
+            if (culture == null)
+            {
+                // Default to first available culture
+                culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
+                    .FirstOrDefault(c => c.IsMainCulture);
+            }
+
+            if (culture == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "No valid culture found" };
+            }
+
+            // Create the hero
+            var characterTemplate = culture.BasicTroop;
+            var hero = HeroCreator.CreateSpecialHero(
+                characterTemplate,
+                Settlement.CurrentSettlement ?? Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown),
+                null,
+                null,
+                packet.StartingAge
+            );
+
+            if (hero == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "Failed to create hero" };
+            }
+
+            // Set hero name
+            hero.SetName(new TaleWorlds.Localization.TextObject(packet.CharacterName),
+                         new TaleWorlds.Localization.TextObject(packet.CharacterName));
+
+            // Set gender
+            if (packet.IsFemale != hero.IsFemale)
+            {
+                // Hero gender is determined at creation - may need different approach
+            }
+
+            // Create a new clan for this player
+            var clan = CreatePlayerClan(hero, culture, packet.CharacterName);
+
+            // Create mobile party for the hero
+            var spawnPosition = GetSafeSpawnPosition();
+            var party = MobileParty.CreateParty($"coop_party_{player.NetworkId}", hero);
+
+            if (party == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "Failed to create party" };
+            }
+
+            // Initialize party
+            party.InitializeMobilePartyAtPosition(characterTemplate, spawnPosition, 0f);
+            party.SetAsMainParty();
+
+            // Add some starting troops
+            var basicTroop = culture.BasicTroop;
+            if (basicTroop != null)
+            {
+                party.AddElementToMemberRoster(basicTroop, 10);
+            }
+
+            return new SpawnResult
+            {
+                Success = true,
+                HeroId = hero.StringId,
+                PartyId = party.StringId,
+                ClanId = clan?.StringId,
+                SpawnX = spawnPosition.X,
+                SpawnY = spawnPosition.Y
+            };
+        }
+        catch (Exception ex)
+        {
+            return new SpawnResult { Success = false, ErrorMessage = ex.Message };
+        }
+    }
+
+    private Clan? CreatePlayerClan(Hero leader, CultureObject culture, string playerName)
+    {
+        try
+        {
+            // Create a new minor clan for the player
+            var clanName = new TaleWorlds.Localization.TextObject($"{playerName}'s Warband");
+            var clan = Clan.CreateClan($"coop_clan_{leader.StringId}");
+
+            if (clan != null)
+            {
+                clan.InitializeClan(clanName, clanName, culture, Banner.CreateRandomClanBanner(-1));
+                clan.SetLeader(leader);
+                leader.Clan = clan;
+            }
+
+            return clan;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Failed to create clan: {ex.Message}");
+            return null;
+        }
+    }
+
+    private Vec2 GetSafeSpawnPosition()
+    {
+        // Find a safe spawn location - prefer a town near the host
+        var hostPlayer = _playerManager.GetPlayer(0);
+        if (hostPlayer != null)
+        {
+            // Spawn near host with some offset
+            var offset = new Vec2(MBRandom.RandomFloat * 10 - 5, MBRandom.RandomFloat * 10 - 5);
+            return new Vec2(hostPlayer.MapPositionX + offset.X, hostPlayer.MapPositionY + offset.Y);
+        }
+
+        // Fallback: spawn at a random town
+        var town = Campaign.Current?.Settlements.FirstOrDefault(s => s.IsTown);
+        if (town != null)
+        {
+            return town.Position2D;
+        }
+
+        // Last resort: center of map
+        return new Vec2(500, 500);
+    }
+
+    private void SendCharacterCreationResponse(int peerId, int playerId, bool success, string? error,
+        string? heroId = null, string? partyId = null, string? clanId = null,
+        float spawnX = 0, float spawnY = 0)
+    {
+        var response = new CharacterCreationResponsePacket
+        {
+            PlayerId = playerId,
+            Success = success,
+            ErrorMessage = error,
+            HeroId = heroId,
+            PartyId = partyId,
+            ClanId = clanId,
+            SpawnX = spawnX,
+            SpawnY = spawnY
+        };
+
+        NetworkManager.Instance?.SendTo(peerId, response);
+    }
+
+    private void BroadcastPlayerJoined(CoopPlayer player)
+    {
+        var packet = new SessionPacket
+        {
+            EventType = (int)SessionEventType.PlayerJoined,
+            PlayerId = player.NetworkId,
+            PlayerName = player.Name
+        };
+
+        NetworkManager.Instance?.Send(packet);
+    }
+
+    private void BroadcastPlayerStateUpdate(CoopPlayer player)
+    {
+        var packet = CreatePlayerStatePacket(player);
+        NetworkManager.Instance?.Send(packet);
+    }
+
+    #endregion
+
+    #region Client Methods
+
+    /// <summary>
+    /// Called on client when connection to host is established.
+    /// </summary>
+    private void OnPeerConnected(int peerId)
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null) return;
+
+        // If we're a client and just connected to the host, send join request
+        if (!networkManager.IsHost)
+        {
+            SetState(SessionState.Joining);
+            SendJoinRequest();
+        }
+    }
+
+    private void OnPeerDisconnected(int peerId, DisconnectReason reason)
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null) return;
+
+        if (networkManager.IsHost)
+        {
+            // Host: remove the disconnected player
+            _playerManager.RemovePlayer(peerId);
+
+            // Notify other players
+            var packet = new SessionPacket
+            {
+                EventType = (int)SessionEventType.PlayerLeft,
+                PlayerId = peerId
+            };
+            networkManager.Send(packet);
+        }
+        else
+        {
+            // Client: we disconnected from host
+            SetState(SessionState.Disconnected);
+            _playerManager.Clear();
+        }
+    }
+
+    private void SendJoinRequest()
+    {
+        var config = BannerBrosModule.Instance?.Config;
+        var packet = new JoinRequestPacket
+        {
+            PlayerName = config?.PlayerName ?? "Player",
+            ModVersion = ModVersion,
+            HasExistingCharacter = false // TODO: check if we have saved character data
+        };
+
+        NetworkManager.Instance?.SendToServer(packet);
+        BannerBrosModule.LogMessage("Sent join request to host");
+    }
+
+    private void HandleJoinResponse(JoinResponsePacket packet)
+    {
+        if (!packet.Accepted)
+        {
+            BannerBrosModule.LogMessage($"Join rejected: {packet.RejectionReason}");
+            SetState(SessionState.Disconnected);
+            OnJoinRejected?.Invoke(packet.RejectionReason ?? "Unknown reason");
+            NetworkManager.Instance?.Disconnect();
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"Join accepted! Player ID: {packet.AssignedPlayerId}");
+
+        // Set our local player ID
+        NetworkManager.Instance?.SetLocalPeerId(packet.AssignedPlayerId);
+        _playerManager.LocalPlayerId = packet.AssignedPlayerId;
+
+        // Add existing players
+        foreach (var playerInfo in packet.ExistingPlayers)
+        {
+            var player = new CoopPlayer
+            {
+                NetworkId = playerInfo.NetworkId,
+                Name = playerInfo.Name,
+                HeroId = playerInfo.HeroId,
+                ClanId = playerInfo.ClanId,
+                KingdomId = playerInfo.KingdomId,
+                MapPositionX = playerInfo.MapX,
+                MapPositionY = playerInfo.MapY,
+                IsHost = playerInfo.IsHost
+            };
+            _playerManager.AddPlayer(player);
+        }
+
+        if (packet.RequiresCharacterCreation)
+        {
+            SetState(SessionState.CharacterCreation);
+            _awaitingCharacterCreation = true;
+            OnCharacterCreationRequired?.Invoke();
+        }
+        else
+        {
+            SetState(SessionState.InSession);
+        }
+    }
+
+    /// <summary>
+    /// Called by UI to submit character creation data.
+    /// </summary>
+    public void SubmitCharacterCreation(CharacterCreationPacket packet)
+    {
+        if (_state != SessionState.CharacterCreation) return;
+
+        packet.PlayerId = _playerManager.LocalPlayerId;
+        NetworkManager.Instance?.SendToServer(packet);
+        BannerBrosModule.LogMessage("Submitted character creation to host");
+    }
+
+    private void HandleCharacterCreationResponse(CharacterCreationResponsePacket packet)
+    {
+        if (packet.PlayerId != _playerManager.LocalPlayerId) return;
+
+        _awaitingCharacterCreation = false;
+
+        if (!packet.Success)
+        {
+            BannerBrosModule.LogMessage($"Character creation failed: {packet.ErrorMessage}");
+            // Stay in character creation state to retry
+            return;
+        }
+
+        BannerBrosModule.LogMessage("Character created successfully!");
+
+        // Update local player info
+        var localPlayer = _playerManager.GetLocalPlayer();
+        if (localPlayer != null)
+        {
+            localPlayer.HeroId = packet.HeroId;
+            localPlayer.PartyId = packet.PartyId;
+            localPlayer.ClanId = packet.ClanId;
+            localPlayer.MapPositionX = packet.SpawnX;
+            localPlayer.MapPositionY = packet.SpawnY;
+            localPlayer.State = PlayerState.OnMap;
+
+            OnPlayerSpawned?.Invoke(localPlayer);
+        }
+
+        SetState(SessionState.InSession);
+    }
+
+    private void HandleFullStateSync(FullStateSyncPacket packet)
+    {
+        BannerBrosModule.LogMessage($"Received full state sync: {packet.PlayerStates.Count} players");
+
+        // Update player states
+        foreach (var playerState in packet.PlayerStates)
+        {
+            var player = _playerManager.GetPlayer(playerState.PlayerId);
+            if (player != null)
+            {
+                player.MapPositionX = playerState.MapX;
+                player.MapPositionY = playerState.MapY;
+                player.State = (PlayerState)playerState.State;
+                player.HeroId = playerState.HeroId;
+                player.PartyId = playerState.PartyId;
+                player.ClanId = playerState.ClanId;
+                player.KingdomId = playerState.KingdomId;
+            }
+        }
+
+        // Sync time multiplier
+        if (BannerBrosModule.Instance != null)
+        {
+            BannerBrosModule.Instance.Config.TimeSpeedMultiplier = packet.TimeMultiplier;
+        }
+    }
+
+    private void HandlePlayerStateUpdate(PlayerStatePacket packet)
+    {
+        // Update the player's state in our local manager
+        var player = _playerManager.GetPlayer(packet.PlayerId);
+        if (player != null)
+        {
+            player.MapPositionX = packet.MapX;
+            player.MapPositionY = packet.MapY;
+            player.State = (PlayerState)packet.State;
+            player.HeroId = packet.HeroId;
+            player.PartyId = packet.PartyId;
+            player.ClanId = packet.ClanId;
+            player.KingdomId = packet.KingdomId;
+            player.PartySize = packet.PartySize;
+            player.PartySpeed = packet.PartySpeed;
+        }
+    }
+
+    private void HandleSessionEvent(SessionPacket packet)
+    {
+        var eventType = (SessionEventType)packet.EventType;
+
+        switch (eventType)
+        {
+            case SessionEventType.PlayerJoined:
+                if (_playerManager.GetPlayer(packet.PlayerId) == null)
+                {
+                    var player = new CoopPlayer
+                    {
+                        NetworkId = packet.PlayerId,
+                        Name = packet.PlayerName
+                    };
+                    _playerManager.AddPlayer(player);
+                }
+                break;
+
+            case SessionEventType.PlayerLeft:
+            case SessionEventType.PlayerKicked:
+                _playerManager.RemovePlayer(packet.PlayerId);
+                break;
+        }
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private void SetState(SessionState newState)
+    {
+        if (_state != newState)
+        {
+            _state = newState;
+            OnStateChanged?.Invoke(newState);
+        }
+    }
+
+    private PlayerStatePacket CreatePlayerStatePacket(CoopPlayer player)
+    {
+        return new PlayerStatePacket
+        {
+            PlayerId = player.NetworkId,
+            PlayerName = player.Name,
+            MapX = player.MapPositionX,
+            MapY = player.MapPositionY,
+            State = (int)player.State,
+            HeroId = player.HeroId,
+            PartyId = player.PartyId,
+            ClanId = player.ClanId,
+            KingdomId = player.KingdomId,
+            IsInBattle = player.CurrentBattleId != null,
+            BattleId = player.CurrentBattleId
+        };
+    }
+
+    #endregion
+
+    private class SpawnResult
+    {
+        public bool Success { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? HeroId { get; set; }
+        public string? PartyId { get; set; }
+        public string? ClanId { get; set; }
+        public float SpawnX { get; set; }
+        public float SpawnY { get; set; }
+    }
+}
+
+public enum SessionState
+{
+    Disconnected,
+    Joining,
+    CharacterCreation,
+    InSession
+}
