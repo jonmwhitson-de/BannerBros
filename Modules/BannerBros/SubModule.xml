@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+    <Name value="BannerBros"/>
+    <Id value="BannerBros"/>
+    <Version value="v0.1.0"/>
+    <Author value="BannerBros Team"/>
+    <SingleplayerModule value="true"/>
+    <MultiplayerModule value="false"/>
+    <DependedModules>
+        <DependedModule Id="Native"/>
+        <DependedModule Id="SandBoxCore"/>
+        <DependedModule Id="Sandbox"/>
+        <DependedModule Id="StoryMode"/>
+    </DependedModules>
+    <SubModules>
+        <SubModule>
+            <Name value="BannerBros.Core"/>
+            <DLLName value="BannerBros.Core.dll"/>
+            <SubModuleClassType value="BannerBros.Core.BannerBrosModule"/>
+            <Tags>
+                <Tag key="DedicatedServerType" value="none"/>
+                <Tag key="IsNoRenderModeElement" value="false"/>
+            </Tags>
+        </SubModule>
+        <SubModule>
+            <Name value="BannerBros.Network"/>
+            <DLLName value="BannerBros.Network.dll"/>
+            <SubModuleClassType value="BannerBros.Network.NetworkModule"/>
+            <Tags>
+                <Tag key="DedicatedServerType" value="none"/>
+                <Tag key="IsNoRenderModeElement" value="false"/>
+            </Tags>
+        </SubModule>
+        <SubModule>
+            <Name value="BannerBros.Client"/>
+            <DLLName value="BannerBros.Client.dll"/>
+            <SubModuleClassType value="BannerBros.Client.ClientModule"/>
+            <Tags>
+                <Tag key="DedicatedServerType" value="none"/>
+                <Tag key="IsNoRenderModeElement" value="false"/>
+            </Tags>
+        </SubModule>
+    </SubModules>
+</Module>

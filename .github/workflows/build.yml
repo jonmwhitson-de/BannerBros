@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  DOTNET_VERSION: '6.0.x'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore BannerBros.sln
+
+      - name: Build
+        run: dotnet build BannerBros.sln --configuration Release --no-restore
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BannerBros-${{ github.sha }}
+          path: |
+            Modules/BannerBros/bin/Win64_Shipping_Client/*.dll
+            Modules/BannerBros/SubModule.xml
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build Release
+        run: dotnet build BannerBros.sln --configuration Release
+
+      - name: Package mod
+        run: |
+          mkdir -p release/BannerBros
+          cp -r Modules/BannerBros/* release/BannerBros/
+          cd release && zip -r ../BannerBros-latest.zip BannerBros
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BannerBros-Release
+          path: BannerBros-latest.zip
+          retention-days: 90

@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputPath>..\..\Modules\BannerBros\bin\Win64_Shipping_Client\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Detect if we have local game installation -->
+    <UseLocalGameRefs Condition="Exists('$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.Core.dll')">true</UseLocalGameRefs>
+    <UseLocalGameRefs Condition="'$(UseLocalGameRefs)' == ''">false</UseLocalGameRefs>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Harmony for runtime patching -->
+    <PackageReference Include="Lib.Harmony" Version="2.3.3" />
+  </ItemGroup>
+
+  <!-- NuGet Reference Assemblies (for CI builds without game installed) -->
+  <ItemGroup Condition="'$(UseLocalGameRefs)' != 'true'">
+    <PackageReference Include="Bannerlord.ReferenceAssemblies" Version="1.2.13.92972" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Local Game References (when game is installed) -->
+  <ItemGroup Condition="'$(UseLocalGameRefs)' == 'true'">
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.CampaignSystem">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.CampaignSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.SaveSystem">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.SaveSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Localization">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ObjectSystem">
+      <HintPath>$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.ObjectSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BannerBros.Network\BannerBros.Network.csproj" />
+  </ItemGroup>
+
+</Project>

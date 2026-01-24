@@ -1,0 +1,46 @@
+# Build outputs
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+
+# Rider
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NuGet
+packages/
+*.nupkg
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+
+# Bannerlord mod output (keep structure, ignore built files)
+Modules/BannerBros/bin/Win64_Shipping_Client/*.dll
+Modules/BannerBros/bin/Win64_Shipping_Client/*.pdb
+
+# Reference modules (from game installation)
+Modules/Native/
+Modules/BannerlordOnline/
+Modules/Multiplayer/
+Modules/CustomBattle/
+Modules/FastMode/
+Modules/BirthAndDeath/
+
+# Logs
+*.log
+
+# User config
+BannerBros.json
