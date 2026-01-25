@@ -131,8 +131,16 @@ public static class EscapeMenuPatches
     {
         public static void Postfix(EscapeMenuVM __instance)
         {
+            BannerBrosModule.LogMessage("EscapeMenuVM patch triggered");
+
             var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
+            if (module?.IsConnected != true)
+            {
+                BannerBrosModule.LogMessage("Not connected, skipping escape menu options");
+                return;
+            }
+
+            BannerBrosModule.LogMessage("Adding co-op escape menu options...");
 
             // Add co-op menu items
             try
