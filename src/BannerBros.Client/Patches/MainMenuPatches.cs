@@ -89,7 +89,7 @@ public static class MainMenuPatches
                     new TextObject(name),
                     9000, // Sort order
                     action,
-                    () => (false, TextObject.Empty) // Not disabled
+                    () => (false, new TextObject("")) // Not disabled
                 );
 
                 return new InitialMenuOptionVM(stateOption);
@@ -140,7 +140,7 @@ public static class EscapeMenuPatches
                         new TextObject("Co-op Players"),
                         _ => CoopSessionMenu.ShowPlayerList(),
                         null,
-                        () => (false, TextObject.Empty)
+                        () => (false, new TextObject(""))
                     );
 
                     // Add settings option (host only)
@@ -150,7 +150,7 @@ public static class EscapeMenuPatches
                             new TextObject("Co-op Settings"),
                             _ => CoopSessionMenu.ShowSettings(),
                             null,
-                            () => (false, TextObject.Empty)
+                            () => (false, new TextObject(""))
                         );
                         items.Insert(insertIndex, settingsItem);
                         insertIndex++;
@@ -163,7 +163,7 @@ public static class EscapeMenuPatches
                         new TextObject("Leave Co-op"),
                         _ => CoopSessionMenu.ShowDisconnectConfirm(),
                         null,
-                        () => (false, TextObject.Empty)
+                        () => (false, new TextObject(""))
                     );
                     items.Add(disconnectItem);
                 }
