@@ -73,10 +73,10 @@ public class MessageHandler
         // If host, relay appropriately
         if (_networkManager.IsHost)
         {
-            if (packet.Channel == 2 && packet.TargetPlayerId.HasValue)
+            if (packet.Channel == 2 && packet.TargetPlayerId >= 0)
             {
                 // Whisper - only send to target
-                _networkManager.SendTo(packet.TargetPlayerId.Value, packet);
+                _networkManager.SendTo(packet.TargetPlayerId, packet);
             }
             else
             {
@@ -174,7 +174,7 @@ public class MessageHandler
 
     public void HandleFullStateSync(FullStateSyncPacket packet, NetPeer peer)
     {
-        Console.WriteLine($"[BannerBros.Network] Full state sync: {packet.PlayerStates.Count} players, {packet.ActiveBattles.Count} battles");
+        Console.WriteLine($"[BannerBros.Network] Full state sync received");
 
         // Only clients receive full state sync
         if (_networkManager.IsHost) return;
