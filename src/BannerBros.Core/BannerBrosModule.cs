@@ -34,14 +34,14 @@ public class BannerBrosModule : MBSubModuleBase
         base.OnSubModuleLoad();
         Instance = this;
 
-        // DISABLED: Testing minimal load
-        // Config = BannerBrosConfig.Load();
-        // PlayerManager = new PlayerManager();
-        // WorldStateManager = new WorldStateManager();
-        // SessionManager = new SessionManager(PlayerManager, WorldStateManager);
-        // InitializeHarmony();
+        // RE-ENABLED: Core managers
+        Config = BannerBrosConfig.Load();
+        PlayerManager = new PlayerManager();
+        WorldStateManager = new WorldStateManager();
+        SessionManager = new SessionManager(PlayerManager, WorldStateManager);
+        // InitializeHarmony(); // Still disabled
 
-        LogMessage("BannerBros v0.1.0 loaded (MINIMAL MODE)");
+        LogMessage("BannerBros v0.1.0 loaded");
     }
 
     private void InitializeHarmony()
@@ -63,10 +63,9 @@ public class BannerBrosModule : MBSubModuleBase
     {
         base.OnSubModuleUnloaded();
 
-        // Only cleanup if initialized
-        // SessionManager?.Cleanup();
-        // _harmony?.UnpatchAll(HarmonyId);
-        // Config?.Save();
+        // SessionManager?.Cleanup(); // Disabled
+        // _harmony?.UnpatchAll(HarmonyId); // Disabled
+        Config?.Save();
         Instance = null;
     }
 
