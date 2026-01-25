@@ -83,19 +83,34 @@ public static class MainMenuPatches
         {
             try
             {
+                // Wrap the action in error handling
+                Action safeAction = () =>
+                {
+                    try
+                    {
+                        BannerBrosModule.LogMessage($"Menu option '{name}' clicked");
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        BannerBrosModule.LogMessage($"Error in menu action '{name}': {ex.Message}");
+                    }
+                };
+
                 // Create the initial state option
                 var stateOption = new InitialStateOption(
                     id,
                     new TextObject(name),
                     9000, // Sort order
-                    action,
+                    safeAction,
                     () => (false, new TextObject("")) // Not disabled - value tuple for InitialStateOption
                 );
 
                 return new InitialMenuOptionVM(stateOption);
             }
-            catch
+            catch (Exception ex)
             {
+                BannerBrosModule.LogMessage($"Error creating menu option '{name}': {ex.Message}");
                 return null;
             }
         }

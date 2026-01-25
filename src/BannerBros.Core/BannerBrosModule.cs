@@ -115,12 +115,32 @@ public class BannerBrosModule : MBSubModuleBase
 
     public void HostSession(int port = 7777)
     {
-        IsHost = true;
-        NetworkManager.Instance?.StartHost(port, Config.MaxPlayers);
-        SessionManager.Initialize();
-        SessionManager.StartHostSession();
-        IsConnected = true;
-        LogMessage($"Hosting session on port {port}");
+        try
+        {
+            LogMessage("HostSession: Setting IsHost = true");
+            IsHost = true;
+
+            LogMessage("HostSession: Starting network host...");
+            if (NetworkManager.Instance == null)
+            {
+                LogMessage("Warning: NetworkManager.Instance is null!");
+            }
+            NetworkManager.Instance?.StartHost(port, Config.MaxPlayers);
+
+            LogMessage("HostSession: Initializing SessionManager...");
+            SessionManager.Initialize();
+
+            LogMessage("HostSession: Starting host session...");
+            SessionManager.StartHostSession();
+
+            IsConnected = true;
+            LogMessage($"Hosting session on port {port}");
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"HostSession error: {ex.Message}");
+            LogMessage($"Stack trace: {ex.StackTrace}");
+        }
     }
 
     public void JoinSession(string address, int port = 7777)

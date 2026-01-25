@@ -82,35 +82,58 @@ public class SessionManager
     /// </summary>
     public void StartHostSession()
     {
-        SetState(SessionState.InSession);
-
-        // Add host as player 0
-        var hostPlayer = new CoopPlayer
+        try
         {
-            NetworkId = 0,
-            Name = BannerBrosModule.Instance?.Config.PlayerName ?? "Host",
-            IsHost = true,
-            State = PlayerState.OnMap
-        };
+            BannerBrosModule.LogMessage("StartHostSession: Setting state to InSession");
+            SetState(SessionState.InSession);
 
-        // Link host to the main hero
-        if (Hero.MainHero != null)
-        {
-            hostPlayer.HeroId = Hero.MainHero.StringId;
-            hostPlayer.ClanId = Hero.MainHero.Clan?.StringId;
-            hostPlayer.KingdomId = Hero.MainHero.Clan?.Kingdom?.StringId;
-
-            if (MobileParty.MainParty != null)
+            // Add host as player 0
+            var hostPlayer = new CoopPlayer
             {
-                hostPlayer.PartyId = MobileParty.MainParty.StringId;
-                var pos = MobileParty.MainParty.GetPosition2D;
-                hostPlayer.MapPositionX = pos.x;
-                hostPlayer.MapPositionY = pos.y;
-            }
-        }
+                NetworkId = 0,
+                Name = BannerBrosModule.Instance?.Config.PlayerName ?? "Host",
+                IsHost = true,
+                State = PlayerState.OnMap
+            };
 
-        _playerManager.LocalPlayerId = 0;
-        _playerManager.AddPlayer(hostPlayer);
+            BannerBrosModule.LogMessage("StartHostSession: Created host player");
+
+            // Link host to the main hero (only if in campaign)
+            try
+            {
+                if (Hero.MainHero != null)
+                {
+                    BannerBrosModule.LogMessage("StartHostSession: Linking to MainHero");
+                    hostPlayer.HeroId = Hero.MainHero.StringId;
+                    hostPlayer.ClanId = Hero.MainHero.Clan?.StringId;
+                    hostPlayer.KingdomId = Hero.MainHero.Clan?.Kingdom?.StringId;
+
+                    if (MobileParty.MainParty != null)
+                    {
+                        hostPlayer.PartyId = MobileParty.MainParty.StringId;
+                        var pos = MobileParty.MainParty.GetPosition2D;
+                        hostPlayer.MapPositionX = pos.x;
+                        hostPlayer.MapPositionY = pos.y;
+                    }
+                }
+                else
+                {
+                    BannerBrosModule.LogMessage("StartHostSession: No MainHero yet (will link after campaign starts)");
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"StartHostSession: Error linking hero (safe to ignore before campaign): {ex.Message}");
+            }
+
+            _playerManager.LocalPlayerId = 0;
+            _playerManager.AddPlayer(hostPlayer);
+            BannerBrosModule.LogMessage("StartHostSession: Host player added successfully");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"StartHostSession error: {ex.Message}");
+        }
     }
 
     private void HandleJoinRequest(JoinRequestPacket packet, int peerId)

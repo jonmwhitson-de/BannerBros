@@ -31,18 +31,25 @@ public static class MainMenuExtension
 
     public static void ShowHostDialog()
     {
-        var inquiry = new InquiryData(
-            "Host Co-op Session",
-            "Start a new co-op campaign or host an existing save.\n\nOther players will be able to join your game.",
-            true,
-            true,
-            "Host New Campaign",
-            "Cancel",
-            OnHostNewCampaign,
-            null
-        );
+        try
+        {
+            var inquiry = new InquiryData(
+                "Host Co-op Session",
+                "Start a new co-op campaign or host an existing save.\n\nOther players will be able to join your game.",
+                true,
+                true,
+                "Host New Campaign",
+                "Cancel",
+                OnHostNewCampaign,
+                null
+            );
 
-        InformationManager.ShowInquiry(inquiry, true);
+            InformationManager.ShowInquiry(inquiry, true);
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Error showing host dialog: {ex.Message}");
+        }
     }
 
     public static void ShowJoinDialog()
@@ -87,16 +94,29 @@ public static class MainMenuExtension
 
     private static void OnHostNewCampaign()
     {
-        var module = BannerBrosModule.Instance;
-        if (module == null) return;
+        try
+        {
+            var module = BannerBrosModule.Instance;
+            if (module == null)
+            {
+                BannerBrosModule.LogMessage("Error: BannerBrosModule.Instance is null");
+                return;
+            }
 
-        // Start hosting
-        module.HostSession(module.Config.DefaultPort);
+            BannerBrosModule.LogMessage("Starting host session...");
 
-        // Proceed to campaign creation
-        BannerBrosModule.LogMessage("Hosting on port " + module.Config.DefaultPort);
+            // Start hosting
+            module.HostSession(module.Config.DefaultPort);
 
-        // The game's normal campaign start flow will continue
+            // Proceed to campaign creation
+            BannerBrosModule.LogMessage("Hosting on port " + module.Config.DefaultPort);
+
+            // The game's normal campaign start flow will continue
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Error starting host: {ex.Message}");
+        }
     }
 
     private static void OnJoinConfirmed(string address)
