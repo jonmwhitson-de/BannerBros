@@ -109,9 +109,9 @@ public class BannerBrosModule : MBSubModuleBase
         // Testing one at a time
         starter.AddBehavior(new BannerBrosCampaignBehavior());
         starter.AddBehavior(new TimeControlBehavior());
-        // starter.AddBehavior(new BattleJoinBehavior());
+        starter.AddBehavior(new BattleJoinBehavior());
         // starter.AddBehavior(new PlayerProtectionBehavior());
-        LogMessage("Testing: +TimeControlBehavior");
+        LogMessage("Testing: +BattleJoinBehavior");
     }
 
     public void HostSession(int port = 7777)
