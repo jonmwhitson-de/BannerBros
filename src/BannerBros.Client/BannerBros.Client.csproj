@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <OutputPath>..\..\Modules\BannerBros\bin\Win64_Shipping_Client\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <!-- Detect if we have local game installation -->
     <UseLocalGameRefs Condition="Exists('$(BANNERLORD_PATH)\bin\Win64_Shipping_Client\TaleWorlds.Core.dll')">true</UseLocalGameRefs>
     <UseLocalGameRefs Condition="'$(UseLocalGameRefs)' == ''">false</UseLocalGameRefs>
