@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -143,14 +144,14 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             MapX = player.MapPositionX,
             MapY = player.MapPositionY,
             State = (int)player.State,
-            HeroId = player.HeroId,
-            PartyId = player.PartyId,
-            ClanId = player.ClanId,
-            KingdomId = player.KingdomId,
+            HeroId = player.HeroId ?? "",
+            PartyId = player.PartyId ?? "",
+            ClanId = player.ClanId ?? "",
+            KingdomId = player.KingdomId ?? "",
             PartySize = party?.MemberRoster?.TotalManCount ?? 0,
             PartySpeed = party?.Speed ?? 0,
             IsInBattle = player.CurrentBattleId != null,
-            BattleId = player.CurrentBattleId
+            BattleId = player.CurrentBattleId ?? ""
         };
 
         // Send with unreliable delivery for frequent position updates (reduces latency)
@@ -207,27 +208,30 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         // Update server time
         module.WorldStateManager.UpdateServerTime(CampaignTime.Now);
 
+        // Build battle info list
+        var battles = new List<BattleInfo>();
+        foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
+        {
+            battles.Add(new BattleInfo
+            {
+                BattleId = battle.BattleId,
+                MapPosition = battle.MapPosition,
+                InitiatorPlayerId = battle.InitiatorPlayerId,
+                AttackerPlayerIdsJson = JsonSerializer.Serialize(battle.GetPlayersOnSide(BattleSide.Attacker).ToList()),
+                DefenderPlayerIdsJson = JsonSerializer.Serialize(battle.GetPlayersOnSide(BattleSide.Defender).ToList())
+            });
+        }
+
         // Send lightweight world sync
         var packet = new WorldSyncPacket
         {
             CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
             TimeMultiplier = module.Config.TimeSpeedMultiplier,
             Season = (int)CampaignTime.Now.GetSeasonOfYear,
-            DayOfSeason = CampaignTime.Now.GetDayOfSeason
+            DayOfSeason = CampaignTime.Now.GetDayOfSeason,
+            ActiveBattleCount = battles.Count,
+            BattleDataJson = JsonSerializer.Serialize(battles)
         };
-
-        // Add active battles
-        foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
-        {
-            packet.ActiveBattles.Add(new BattleInfo
-            {
-                BattleId = battle.BattleId,
-                MapPosition = battle.MapPosition,
-                InitiatorPlayerId = battle.InitiatorPlayerId,
-                AttackerPlayerIds = battle.GetPlayersOnSide(BattleSide.Attacker).ToList(),
-                DefenderPlayerIds = battle.GetPlayersOnSide(BattleSide.Defender).ToList()
-            });
-        }
 
         networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
     }
@@ -239,37 +243,31 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
         if (module?.IsHost != true || networkManager == null) return;
 
-        var packet = new FullStateSyncPacket
-        {
-            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
-            Year = CampaignTime.Now.GetYear,
-            Season = (int)CampaignTime.Now.GetSeasonOfYear,
-            TimeMultiplier = module.Config.TimeSpeedMultiplier
-        };
-
-        // Add all player states
+        // Build player states
+        var playerStates = new List<PlayerStatePacket>();
         foreach (var player in module.PlayerManager.Players.Values)
         {
-            packet.PlayerStates.Add(new PlayerStatePacket
+            playerStates.Add(new PlayerStatePacket
             {
                 PlayerId = player.NetworkId,
                 PlayerName = player.Name,
                 MapX = player.MapPositionX,
                 MapY = player.MapPositionY,
                 State = (int)player.State,
-                HeroId = player.HeroId,
-                PartyId = player.PartyId,
-                ClanId = player.ClanId,
-                KingdomId = player.KingdomId,
+                HeroId = player.HeroId ?? "",
+                PartyId = player.PartyId ?? "",
+                ClanId = player.ClanId ?? "",
+                KingdomId = player.KingdomId ?? "",
                 IsInBattle = player.CurrentBattleId != null,
-                BattleId = player.CurrentBattleId
+                BattleId = player.CurrentBattleId ?? ""
             });
         }
 
-        // Add active battles
+        // Build active battles
+        var activeBattles = new List<BattleInfo>();
         foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
         {
-            packet.ActiveBattles.Add(new BattleInfo
+            activeBattles.Add(new BattleInfo
             {
                 BattleId = battle.BattleId,
                 MapPosition = battle.MapPosition,
@@ -277,7 +275,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             });
         }
 
-        // Add diplomacy states (wars, alliances)
+        // Build diplomacy states (wars, alliances)
+        var diplomacyStates = new List<DiplomacyState>();
         if (Campaign.Current?.Kingdoms != null)
         {
             foreach (var kingdom1 in Campaign.Current.Kingdoms)
@@ -289,7 +288,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         var stance = kingdom1.GetStanceWith(kingdom2);
                         if (stance.IsAtWar || stance.IsAllied)
                         {
-                            packet.DiplomacyStates.Add(new DiplomacyState
+                            diplomacyStates.Add(new DiplomacyState
                             {
                                 Faction1Id = kingdom1.StringId,
                                 Faction2Id = kingdom2.StringId,
@@ -300,6 +299,17 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 }
             }
         }
+
+        var packet = new FullStateSyncPacket
+        {
+            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            Year = CampaignTime.Now.GetYear,
+            Season = (int)CampaignTime.Now.GetSeasonOfYear,
+            TimeMultiplier = module.Config.TimeSpeedMultiplier,
+            PlayerStatesJson = JsonSerializer.Serialize(playerStates),
+            ActiveBattlesJson = JsonSerializer.Serialize(activeBattles),
+            DiplomacyStatesJson = JsonSerializer.Serialize(diplomacyStates)
+        };
 
         networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
     }

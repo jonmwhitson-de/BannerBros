@@ -49,25 +49,8 @@ public class NetworkManager : INetEventListener
 
     private void RegisterPacketTypes()
     {
-        // Register nested types for serialization (classes need factory functions)
-        _packetProcessor.RegisterNestedType(() => new PlayerStatePacket());
-        _packetProcessor.RegisterNestedType(() => new WorldSyncPacket());
-        _packetProcessor.RegisterNestedType(() => new BattleEventPacket());
-        _packetProcessor.RegisterNestedType(() => new ChatPacket());
-        _packetProcessor.RegisterNestedType(() => new TradeRequestPacket());
-        _packetProcessor.RegisterNestedType(() => new SessionPacket());
-        _packetProcessor.RegisterNestedType(() => new JoinRequestPacket());
-        _packetProcessor.RegisterNestedType(() => new JoinResponsePacket());
-        _packetProcessor.RegisterNestedType(() => new CharacterCreationPacket());
-        _packetProcessor.RegisterNestedType(() => new CharacterCreationResponsePacket());
-        _packetProcessor.RegisterNestedType(() => new FullStateSyncPacket());
-        _packetProcessor.RegisterNestedType(() => new ConnectedPlayerInfo());
-        _packetProcessor.RegisterNestedType(() => new BattleInfo());
-        _packetProcessor.RegisterNestedType(() => new DiplomacyState());
-        _packetProcessor.RegisterNestedType(() => new WorldEvent());
-        _packetProcessor.RegisterNestedType(() => new TradeItem());
-
         // Subscribe to packet handlers
+        // NetPacketProcessor auto-serializes classes with public properties
         _packetProcessor.SubscribeReusable<PlayerStatePacket, NetPeer>(_messageHandler.HandlePlayerState);
         _packetProcessor.SubscribeReusable<WorldSyncPacket, NetPeer>(_messageHandler.HandleWorldSync);
         _packetProcessor.SubscribeReusable<BattleEventPacket, NetPeer>(_messageHandler.HandleBattleEvent);

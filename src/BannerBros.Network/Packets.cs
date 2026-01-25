@@ -10,14 +10,14 @@ public class PlayerStatePacket
     public float MapX { get; set; }
     public float MapY { get; set; }
     public int State { get; set; } // PlayerState enum value
-    public string? HeroId { get; set; }
-    public string? PartyId { get; set; }
-    public string? ClanId { get; set; }
-    public string? KingdomId { get; set; }
+    public string HeroId { get; set; } = "";
+    public string PartyId { get; set; } = "";
+    public string ClanId { get; set; } = "";
+    public string KingdomId { get; set; } = "";
     public int PartySize { get; set; }
     public float PartySpeed { get; set; }
     public bool IsInBattle { get; set; }
-    public string? BattleId { get; set; }
+    public string BattleId { get; set; } = "";
 }
 
 /// <summary>
@@ -29,12 +29,9 @@ public class WorldSyncPacket
     public float TimeMultiplier { get; set; }
     public int Season { get; set; }
     public int DayOfSeason { get; set; }
-
-    // Active battles
-    public List<BattleInfo> ActiveBattles { get; set; } = new();
-
-    // Key world events
-    public List<WorldEvent> RecentEvents { get; set; } = new();
+    public int ActiveBattleCount { get; set; }
+    // Battle info serialized as JSON string for simplicity
+    public string BattleDataJson { get; set; } = "";
 }
 
 public class BattleInfo
@@ -42,15 +39,8 @@ public class BattleInfo
     public string BattleId { get; set; } = "";
     public string MapPosition { get; set; } = "";
     public int InitiatorPlayerId { get; set; }
-    public List<int> AttackerPlayerIds { get; set; } = new();
-    public List<int> DefenderPlayerIds { get; set; } = new();
-}
-
-public class WorldEvent
-{
-    public int EventType { get; set; }
-    public string Data { get; set; } = "";
-    public long Timestamp { get; set; }
+    public string AttackerPlayerIdsJson { get; set; } = ""; // JSON array
+    public string DefenderPlayerIdsJson { get; set; } = ""; // JSON array
 }
 
 /// <summary>
@@ -63,7 +53,7 @@ public class BattleEventPacket
     public int PlayerId { get; set; }
     public string MapPosition { get; set; } = "";
     public int Side { get; set; } // BattleSide enum
-    public string? EnemyPartyId { get; set; }
+    public string EnemyPartyId { get; set; } = "";
 }
 
 public enum BattleEventType
@@ -86,7 +76,7 @@ public class ChatPacket
     public string SenderName { get; set; } = "";
     public string Message { get; set; } = "";
     public int Channel { get; set; } // 0 = all, 1 = team, 2 = whisper
-    public int? TargetPlayerId { get; set; } // For whispers
+    public int TargetPlayerId { get; set; } // For whispers, -1 if none
     public long Timestamp { get; set; }
 }
 
@@ -98,22 +88,13 @@ public class TradeRequestPacket
     public int RequestType { get; set; } // TradeRequestType enum
     public int InitiatorId { get; set; }
     public int TargetId { get; set; }
-
-    // Trade offer details
     public int OfferedGold { get; set; }
-    public List<TradeItem> OfferedItems { get; set; } = new();
     public int RequestedGold { get; set; }
-    public List<TradeItem> RequestedItems { get; set; } = new();
-
+    // Items serialized as JSON for simplicity
+    public string OfferedItemsJson { get; set; } = "";
+    public string RequestedItemsJson { get; set; } = "";
     public bool Accepted { get; set; }
-    public string? RejectionReason { get; set; }
-}
-
-public class TradeItem
-{
-    public string ItemId { get; set; } = "";
-    public int Count { get; set; }
-    public int ModifierValue { get; set; } // For item quality/modifiers
+    public string RejectionReason { get; set; } = "";
 }
 
 public enum TradeRequestType
@@ -134,7 +115,7 @@ public class SessionPacket
     public int EventType { get; set; } // SessionEventType enum
     public int PlayerId { get; set; }
     public string PlayerName { get; set; } = "";
-    public string? CharacterData { get; set; } // Serialized character for new joins
+    public string CharacterData { get; set; } = "";
 }
 
 public enum SessionEventType
@@ -154,7 +135,7 @@ public class JoinRequestPacket
     public string PlayerName { get; set; } = "";
     public string ModVersion { get; set; } = "";
     public bool HasExistingCharacter { get; set; }
-    public string? CharacterData { get; set; } // Serialized character if rejoining
+    public string CharacterData { get; set; } = "";
 }
 
 /// <summary>
@@ -163,10 +144,11 @@ public class JoinRequestPacket
 public class JoinResponsePacket
 {
     public bool Accepted { get; set; }
-    public string? RejectionReason { get; set; }
+    public string RejectionReason { get; set; } = "";
     public int AssignedPlayerId { get; set; }
-    public string? WorldStateData { get; set; } // Serialized essential world state
-    public List<ConnectedPlayerInfo> ExistingPlayers { get; set; } = new();
+    public string WorldStateData { get; set; } = "";
+    // Existing players serialized as JSON
+    public string ExistingPlayersJson { get; set; } = "";
     public bool RequiresCharacterCreation { get; set; }
 }
 
@@ -174,9 +156,9 @@ public class ConnectedPlayerInfo
 {
     public int NetworkId { get; set; }
     public string Name { get; set; } = "";
-    public string? HeroId { get; set; }
-    public string? ClanId { get; set; }
-    public string? KingdomId { get; set; }
+    public string HeroId { get; set; } = "";
+    public string ClanId { get; set; } = "";
+    public string KingdomId { get; set; } = "";
     public float MapX { get; set; }
     public float MapY { get; set; }
     public bool IsHost { get; set; }
@@ -191,18 +173,13 @@ public class CharacterCreationPacket
     public string CharacterName { get; set; } = "";
     public string CultureId { get; set; } = "";
     public bool IsFemale { get; set; }
-
-    // Appearance
-    public string? BodyPropertiesData { get; set; }
-
-    // Starting attributes/skills (simplified for network)
+    public string BodyPropertiesData { get; set; } = "";
     public int StartingAge { get; set; } = 25;
-    public Dictionary<string, int> Attributes { get; set; } = new();
-    public Dictionary<string, int> Skills { get; set; } = new();
-    public Dictionary<string, int> Perks { get; set; } = new();
-
-    // Equipment loadout
-    public List<string> EquipmentIds { get; set; } = new();
+    // Attributes/skills/perks as JSON
+    public string AttributesJson { get; set; } = "";
+    public string SkillsJson { get; set; } = "";
+    public string PerksJson { get; set; } = "";
+    public string EquipmentIdsJson { get; set; } = "";
 }
 
 /// <summary>
@@ -212,10 +189,10 @@ public class CharacterCreationResponsePacket
 {
     public int PlayerId { get; set; }
     public bool Success { get; set; }
-    public string? ErrorMessage { get; set; }
-    public string? HeroId { get; set; }
-    public string? PartyId { get; set; }
-    public string? ClanId { get; set; }
+    public string ErrorMessage { get; set; } = "";
+    public string HeroId { get; set; } = "";
+    public string PartyId { get; set; } = "";
+    public string ClanId { get; set; } = "";
     public float SpawnX { get; set; }
     public float SpawnY { get; set; }
 }
@@ -230,15 +207,10 @@ public class FullStateSyncPacket
     public int Season { get; set; }
     public int Year { get; set; }
     public float TimeMultiplier { get; set; }
-
-    // All connected players
-    public List<PlayerStatePacket> PlayerStates { get; set; } = new();
-
-    // Active battles that players might want to join
-    public List<BattleInfo> ActiveBattles { get; set; } = new();
-
-    // Key kingdom/faction state (wars, truces)
-    public List<DiplomacyState> DiplomacyStates { get; set; } = new();
+    // Complex data as JSON strings
+    public string PlayerStatesJson { get; set; } = "";
+    public string ActiveBattlesJson { get; set; } = "";
+    public string DiplomacyStatesJson { get; set; } = "";
 }
 
 public class DiplomacyState
@@ -246,4 +218,18 @@ public class DiplomacyState
     public string Faction1Id { get; set; } = "";
     public string Faction2Id { get; set; } = "";
     public int RelationType { get; set; } // War, Peace, Alliance
+}
+
+public class WorldEvent
+{
+    public int EventType { get; set; }
+    public string Data { get; set; } = "";
+    public long Timestamp { get; set; }
+}
+
+public class TradeItem
+{
+    public string ItemId { get; set; } = "";
+    public int Count { get; set; }
+    public int ModifierValue { get; set; }
 }

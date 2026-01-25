@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -143,7 +144,7 @@ public class SessionManager
             Accepted = true,
             AssignedPlayerId = playerId,
             RequiresCharacterCreation = requiresCharacterCreation,
-            ExistingPlayers = GetConnectedPlayerInfos()
+            ExistingPlayersJson = JsonSerializer.Serialize(GetConnectedPlayerInfos())
         };
 
         // Send response
@@ -202,28 +203,30 @@ public class SessionManager
 
     private void SendFullStateSync(int peerId)
     {
-        var packet = new FullStateSyncPacket
-        {
-            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
-            TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f
-        };
-
-        // Add all player states
+        var playerStates = new List<PlayerStatePacket>();
         foreach (var player in _playerManager.Players.Values)
         {
-            packet.PlayerStates.Add(CreatePlayerStatePacket(player));
+            playerStates.Add(CreatePlayerStatePacket(player));
         }
 
-        // Add active battles
+        var activeBattles = new List<BattleInfo>();
         foreach (var battle in _worldStateManager.ActiveBattles.Values)
         {
-            packet.ActiveBattles.Add(new BattleInfo
+            activeBattles.Add(new BattleInfo
             {
                 BattleId = battle.BattleId,
                 MapPosition = battle.MapPosition,
                 InitiatorPlayerId = battle.InitiatorPlayerId
             });
         }
+
+        var packet = new FullStateSyncPacket
+        {
+            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f,
+            PlayerStatesJson = JsonSerializer.Serialize(playerStates),
+            ActiveBattlesJson = JsonSerializer.Serialize(activeBattles)
+        };
 
         NetworkManager.Instance?.SendTo(peerId, packet);
     }
@@ -522,20 +525,27 @@ public class SessionManager
         _playerManager.LocalPlayerId = packet.AssignedPlayerId;
 
         // Add existing players
-        foreach (var playerInfo in packet.ExistingPlayers)
+        if (!string.IsNullOrEmpty(packet.ExistingPlayersJson))
         {
-            var player = new CoopPlayer
+            var existingPlayers = JsonSerializer.Deserialize<List<ConnectedPlayerInfo>>(packet.ExistingPlayersJson);
+            if (existingPlayers != null)
             {
-                NetworkId = playerInfo.NetworkId,
-                Name = playerInfo.Name,
-                HeroId = playerInfo.HeroId,
-                ClanId = playerInfo.ClanId,
-                KingdomId = playerInfo.KingdomId,
-                MapPositionX = playerInfo.MapX,
-                MapPositionY = playerInfo.MapY,
-                IsHost = playerInfo.IsHost
-            };
-            _playerManager.AddPlayer(player);
+                foreach (var playerInfo in existingPlayers)
+                {
+                    var player = new CoopPlayer
+                    {
+                        NetworkId = playerInfo.NetworkId,
+                        Name = playerInfo.Name,
+                        HeroId = playerInfo.HeroId,
+                        ClanId = playerInfo.ClanId,
+                        KingdomId = playerInfo.KingdomId,
+                        MapPositionX = playerInfo.MapX,
+                        MapPositionY = playerInfo.MapY,
+                        IsHost = playerInfo.IsHost
+                    };
+                    _playerManager.AddPlayer(player);
+                }
+            }
         }
 
         if (packet.RequiresCharacterCreation)
@@ -686,12 +696,12 @@ public class SessionManager
             MapX = player.MapPositionX,
             MapY = player.MapPositionY,
             State = (int)player.State,
-            HeroId = player.HeroId,
-            PartyId = player.PartyId,
-            ClanId = player.ClanId,
-            KingdomId = player.KingdomId,
+            HeroId = player.HeroId ?? "",
+            PartyId = player.PartyId ?? "",
+            ClanId = player.ClanId ?? "",
+            KingdomId = player.KingdomId ?? "",
             IsInBattle = player.CurrentBattleId != null,
-            BattleId = player.CurrentBattleId
+            BattleId = player.CurrentBattleId ?? ""
         };
     }
 
