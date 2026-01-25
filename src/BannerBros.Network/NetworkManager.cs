@@ -156,11 +156,11 @@ public class NetworkManager : INetEventListener
         var writer = new NetDataWriter();
         _packetProcessor.Write(writer, packet);
 
-        foreach (var (peerId, peer) in _peers)
+        foreach (var kvp in _peers)
         {
-            if (peerId != excludePeerId)
+            if (kvp.Key != excludePeerId)
             {
-                peer.Send(writer, deliveryMethod);
+                kvp.Value.Send(writer, deliveryMethod);
             }
         }
     }
