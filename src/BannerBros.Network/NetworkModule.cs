@@ -32,7 +32,7 @@ public class NetworkModule : MBSubModuleBase
     {
         base.OnApplicationTick(dt);
 
-        // DISABLED: Isolating crash cause
-        // NetworkManager.Instance?.Update(dt);
+        // RE-ENABLED
+        NetworkManager.Instance?.Update(dt);
     }
 }
