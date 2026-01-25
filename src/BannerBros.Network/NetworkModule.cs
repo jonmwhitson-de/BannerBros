@@ -16,16 +16,15 @@ public class NetworkModule : MBSubModuleBase
         base.OnSubModuleLoad();
         Instance = this;
 
-        // DISABLED: Testing if NetworkManager init causes crash
-        // NetworkManager.Initialize();
+        // RE-ENABLED
+        NetworkManager.Initialize();
     }
 
     protected override void OnSubModuleUnloaded()
     {
         base.OnSubModuleUnloaded();
 
-        // Only shutdown if it was initialized
-        // NetworkManager.Shutdown();
+        NetworkManager.Shutdown();
         Instance = null;
     }
 
