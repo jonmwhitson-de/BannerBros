@@ -34,12 +34,11 @@ public class BannerBrosModule : MBSubModuleBase
         base.OnSubModuleLoad();
         Instance = this;
 
-        // RE-ENABLED: Core managers
         Config = BannerBrosConfig.Load();
         PlayerManager = new PlayerManager();
         WorldStateManager = new WorldStateManager();
         SessionManager = new SessionManager(PlayerManager, WorldStateManager);
-        // InitializeHarmony(); // Still disabled
+        InitializeHarmony();
 
         LogMessage("BannerBros v0.1.0 loaded");
     }
@@ -49,9 +48,8 @@ public class BannerBrosModule : MBSubModuleBase
         try
         {
             _harmony = new Harmony(HarmonyId);
-            // Temporarily disable patches to isolate crash
-            // _harmony.PatchAll(typeof(BannerBrosModule).Assembly);
-            LogMessage("Harmony patches DISABLED for testing");
+            _harmony.PatchAll(typeof(BannerBrosModule).Assembly);
+            LogMessage("Core Harmony patches applied");
         }
         catch (Exception ex)
         {
