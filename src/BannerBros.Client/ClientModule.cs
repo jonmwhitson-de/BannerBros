@@ -92,8 +92,9 @@ public class ClientModule : MBSubModuleBase
         try
         {
             _harmony = new Harmony(HarmonyId);
-            _harmony.PatchAll(typeof(ClientModule).Assembly);
-            BannerBrosModule.LogMessage("Client Harmony patches applied (menu integration)");
+            // DISABLED: All patches disabled to isolate crash
+            // _harmony.PatchAll(typeof(ClientModule).Assembly);
+            BannerBrosModule.LogMessage("Client Harmony patches DISABLED for testing");
         }
         catch (Exception ex)
         {
