@@ -11,11 +11,14 @@ Write-Host "=== BannerBros Deploy Script ===" -ForegroundColor Cyan
 
 # Step 1: Git pull
 Write-Host "`n[1/5] Pulling latest changes..." -ForegroundColor Yellow
+$beforeCommit = git rev-parse HEAD
 git pull
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Git pull failed!" -ForegroundColor Red
     exit 1
 }
+$afterCommit = git rev-parse HEAD
+$changeStats = git diff --stat $beforeCommit $afterCommit 2>$null
 
 # Step 2: Build
 Write-Host "`n[2/5] Building solution..." -ForegroundColor Yellow
@@ -52,7 +55,17 @@ Copy-Item -Path $ModSource -Destination $ModDest -Recurse
 # Verify
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Green
 Write-Host "Mod installed to: $ModDest"
-Write-Host "`nInstalled files:"
-Get-ChildItem "$ModDest\bin\Win64_Shipping_Client\*.dll" | ForEach-Object { Write-Host "  - $($_.Name)" }
+
+# Show what changed
+if ($beforeCommit -ne $afterCommit) {
+    Write-Host "`n=== Changes Pulled ===" -ForegroundColor Magenta
+    git log --oneline $beforeCommit..$afterCommit
+    Write-Host ""
+    if ($changeStats) {
+        Write-Host $changeStats
+    }
+} else {
+    Write-Host "`nNo new changes pulled (already up to date)" -ForegroundColor Gray
+}
 
 Write-Host "`nYou can now launch Bannerlord!" -ForegroundColor Cyan
