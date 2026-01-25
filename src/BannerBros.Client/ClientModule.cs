@@ -28,14 +28,14 @@ public class ClientModule : MBSubModuleBase
         base.OnSubModuleLoad();
         Instance = this;
 
-        // DISABLED: Testing minimal load
-        // MenuManager = new CoopMenuManager();
-        // HUDManager = new PlayerHUDManager();
-        // MapMarkers = new PlayerMapMarkers();
-        // InitializeHarmony();
-        // SubscribeToSessionEvents();
+        // RE-ENABLED: Client managers
+        MenuManager = new CoopMenuManager();
+        HUDManager = new PlayerHUDManager();
+        MapMarkers = new PlayerMapMarkers();
+        // InitializeHarmony(); // Still disabled
+        // SubscribeToSessionEvents(); // Still disabled
 
-        BannerBrosModule.LogMessage("Client module loaded (MINIMAL MODE)");
+        BannerBrosModule.LogMessage("Client module loaded");
     }
 
     private void SubscribeToSessionEvents()
