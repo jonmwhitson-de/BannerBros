@@ -4,6 +4,8 @@ using TaleWorlds.Library;
 using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.ViewModelCollection;
+using TaleWorlds.MountAndBlade.ViewModelCollection.InitialMenu;
+using TaleWorlds.MountAndBlade.ViewModelCollection.EscapeMenu;
 using BannerBros.Client.UI;
 using BannerBros.Core;
 
