@@ -31,7 +31,7 @@ public class NetworkModule : MBSubModuleBase
     {
         base.OnApplicationTick(dt);
 
-        // Process network messages
-        NetworkManager.Instance?.Update(dt);
+        // DISABLED: Isolating crash cause
+        // NetworkManager.Instance?.Update(dt);
     }
 }

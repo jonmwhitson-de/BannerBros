@@ -108,10 +108,12 @@ public class BannerBrosModule : MBSubModuleBase
 
     private void InitializeCampaignBehaviors(CampaignGameStarter starter)
     {
-        starter.AddBehavior(new BannerBrosCampaignBehavior());
-        starter.AddBehavior(new TimeControlBehavior());
-        starter.AddBehavior(new BattleJoinBehavior());
-        starter.AddBehavior(new PlayerProtectionBehavior());
+        // DISABLED: Isolating crash cause
+        // starter.AddBehavior(new BannerBrosCampaignBehavior());
+        // starter.AddBehavior(new TimeControlBehavior());
+        // starter.AddBehavior(new BattleJoinBehavior());
+        // starter.AddBehavior(new PlayerProtectionBehavior());
+        LogMessage("Campaign behaviors DISABLED for testing");
     }
 
     public void HostSession(int port = 7777)
