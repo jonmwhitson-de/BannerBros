@@ -1,5 +1,6 @@
 using HarmonyLib;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.CampaignSystem;
 using BannerBros.Core.Patches;

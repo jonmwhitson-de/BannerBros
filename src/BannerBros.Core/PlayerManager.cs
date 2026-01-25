@@ -129,6 +129,9 @@ public class CoopPlayer
     public float MapPositionX { get; set; }
     public float MapPositionY { get; set; }
 
+    public int PartySize { get; set; }
+    public float PartySpeed { get; set; }
+
     public PlayerState State { get; set; } = PlayerState.OnMap;
     public string? CurrentBattleId { get; set; }
 

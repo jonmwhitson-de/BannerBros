@@ -3,6 +3,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.Conversation;
+using TaleWorlds.MountAndBlade;
 using BannerBros.Network;
 using LiteNetLib;
 
@@ -98,9 +99,9 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
         if (mainParty != null)
         {
-            var pos = mainParty.Position2D;
-            currentX = pos.X;
-            currentY = pos.Y;
+            var pos = mainParty.GetPosition2D;
+            currentX = pos.x;
+            currentY = pos.y;
             localPlayer.MapPositionX = currentX;
             localPlayer.MapPositionY = currentY;
             localPlayer.PartyId = mainParty.StringId;
@@ -225,7 +226,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         // Send lightweight world sync
         var packet = new WorldSyncPacket
         {
-            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            CampaignTimeTicks = CampaignTime.Now.NumTicks,
             TimeMultiplier = module.Config.TimeSpeedMultiplier,
             Season = (int)CampaignTime.Now.GetSeasonOfYear,
             DayOfSeason = CampaignTime.Now.GetDayOfSeason,
@@ -286,13 +287,17 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                     if (kingdom1.StringId.CompareTo(kingdom2.StringId) < 0) // Avoid duplicates
                     {
                         var stance = kingdom1.GetStanceWith(kingdom2);
-                        if (stance.IsAtWar || stance.IsAllied)
+                        // Check war status and alliance based on available API
+                        var isAtWar = stance.IsAtWar;
+                        // Alliance check - use IsNeutral as inverse indicator if IsAllied not available
+                        var isAllied = !stance.IsAtWar && !stance.IsNeutral;
+                        if (isAtWar || isAllied)
                         {
                             diplomacyStates.Add(new DiplomacyState
                             {
                                 Faction1Id = kingdom1.StringId,
                                 Faction2Id = kingdom2.StringId,
-                                RelationType = stance.IsAtWar ? 1 : (stance.IsAllied ? 2 : 0)
+                                RelationType = isAtWar ? 1 : (isAllied ? 2 : 0)
                             });
                         }
                     }
@@ -302,7 +307,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
         var packet = new FullStateSyncPacket
         {
-            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            CampaignTimeTicks = CampaignTime.Now.NumTicks,
             Year = CampaignTime.Now.GetYear,
             Season = (int)CampaignTime.Now.GetSeasonOfYear,
             TimeMultiplier = module.Config.TimeSpeedMultiplier,

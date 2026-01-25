@@ -1,6 +1,8 @@
 using System.Text.Json;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Party.PartyComponents;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
@@ -101,9 +103,9 @@ public class SessionManager
             if (MobileParty.MainParty != null)
             {
                 hostPlayer.PartyId = MobileParty.MainParty.StringId;
-                var pos = MobileParty.MainParty.Position2D;
-                hostPlayer.MapPositionX = pos.X;
-                hostPlayer.MapPositionY = pos.Y;
+                var pos = MobileParty.MainParty.GetPosition2D;
+                hostPlayer.MapPositionX = pos.x;
+                hostPlayer.MapPositionY = pos.y;
             }
         }
 
@@ -222,7 +224,7 @@ public class SessionManager
 
         var packet = new FullStateSyncPacket
         {
-            CampaignTimeTicks = CampaignTime.Now.GetNumTicks(),
+            CampaignTimeTicks = CampaignTime.Now.NumTicks,
             TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f,
             PlayerStatesJson = JsonSerializer.Serialize(playerStates),
             ActiveBattlesJson = JsonSerializer.Serialize(activeBattles)
@@ -330,22 +332,45 @@ public class SessionManager
 
             // Create mobile party for the hero
             var spawnPosition = GetSafeSpawnPosition();
-            var party = MobileParty.CreateParty($"coop_party_{player.NetworkId}", hero);
 
-            if (party == null)
+            // Use PartyTemplateObject from culture for proper initialization
+            var partyTemplate = culture.DefaultPartyTemplate;
+
+            // Create and initialize the party
+            MobileParty party;
+            try
             {
-                return new SpawnResult { Success = false, ErrorMessage = "Failed to create party" };
-            }
+                party = MobileParty.CreateParty(
+                    $"coop_party_{player.NetworkId}",
+                    new LordPartyComponent(hero, hero),
+                    delegate(MobileParty mobileParty)
+                    {
+                        mobileParty.SetInititave(0f, 1f, float.MaxValue);
+                    });
 
-            // Initialize party
-            party.InitializeMobilePartyAtPosition(characterTemplate, spawnPosition, 0f);
-            party.SetAsMainParty();
+                if (party == null)
+                {
+                    return new SpawnResult { Success = false, ErrorMessage = "Failed to create party" };
+                }
+
+                // Position the party on the map
+                party.InitializeMobilePartyAroundPosition(
+                    partyTemplate ?? culture.DefaultPartyTemplate,
+                    spawnPosition,
+                    5f, // radius
+                    0f  // initial bearing
+                );
+            }
+            catch (Exception ex)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = $"Party creation failed: {ex.Message}" };
+            }
 
             // Add some starting troops
             var basicTroop = culture.BasicTroop;
             if (basicTroop != null)
             {
-                party.AddElementToMemberRoster(basicTroop, 10);
+                party.MemberRoster.AddToCounts(basicTroop, 10);
             }
 
             return new SpawnResult
@@ -370,13 +395,29 @@ public class SessionManager
         {
             // Create a new minor clan for the player
             var clanName = new TaleWorlds.Localization.TextObject($"{playerName}'s Warband");
-            var clan = Clan.CreateClan($"coop_clan_{leader.StringId}");
+            var clanStringId = $"coop_clan_{leader.StringId}";
+
+            // Use ChangeClanAction or set directly if clan already exists
+            var existingClan = Clan.FindFirst(c => c.StringId == clanStringId);
+            if (existingClan != null)
+            {
+                leader.Clan = existingClan;
+                return existingClan;
+            }
+
+            // Create new clan - Bannerlord API varies by version
+            // This is a simplified approach using object registration
+            var clan = MBObjectManager.Instance.CreateObject<Clan>(clanStringId);
 
             if (clan != null)
             {
-                clan.InitializeClan(clanName, clanName, culture, Banner.CreateRandomClanBanner(-1));
+                // Set basic properties
+                clan.Culture = culture;
                 clan.SetLeader(leader);
                 leader.Clan = clan;
+
+                // Register with campaign
+                Campaign.Current?.CampaignObjectManager?.AddClanToCampaign(clan);
             }
 
             return clan;
@@ -395,15 +436,16 @@ public class SessionManager
         if (hostPlayer != null)
         {
             // Spawn near host with some offset
-            var offset = new Vec2(MBRandom.RandomFloat * 10 - 5, MBRandom.RandomFloat * 10 - 5);
-            return new Vec2(hostPlayer.MapPositionX + offset.X, hostPlayer.MapPositionY + offset.Y);
+            var offsetX = MBRandom.RandomFloat * 10 - 5;
+            var offsetY = MBRandom.RandomFloat * 10 - 5;
+            return new Vec2(hostPlayer.MapPositionX + offsetX, hostPlayer.MapPositionY + offsetY);
         }
 
         // Fallback: spawn at a random town
         var town = Campaign.Current?.Settlements.FirstOrDefault(s => s.IsTown);
         if (town != null)
         {
-            return town.Position2D;
+            return town.GatePosition;
         }
 
         // Last resort: center of map
@@ -606,10 +648,25 @@ public class SessionManager
 
     private void HandleFullStateSync(FullStateSyncPacket packet)
     {
-        BannerBrosModule.LogMessage($"Received full state sync: {packet.PlayerStates.Count} players");
+        // Deserialize player states from JSON
+        var playerStates = new List<PlayerStatePacket>();
+        if (!string.IsNullOrEmpty(packet.PlayerStatesJson))
+        {
+            try
+            {
+                playerStates = JsonSerializer.Deserialize<List<PlayerStatePacket>>(packet.PlayerStatesJson)
+                    ?? new List<PlayerStatePacket>();
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Failed to parse player states: {ex.Message}");
+            }
+        }
+
+        BannerBrosModule.LogMessage($"Received full state sync: {playerStates.Count} players");
 
         // Update player states
-        foreach (var playerState in packet.PlayerStates)
+        foreach (var playerState in playerStates)
         {
             var player = _playerManager.GetPlayer(playerState.PlayerId);
             if (player != null)
