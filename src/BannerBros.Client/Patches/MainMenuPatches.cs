@@ -89,7 +89,7 @@ public static class MainMenuPatches
                     new TextObject(name),
                     9000, // Sort order
                     action,
-                    () => new Tuple<bool, TextObject>(false, new TextObject("")) // Not disabled
+                    () => (false, new TextObject("")) // Not disabled - value tuple for InitialStateOption
                 );
 
                 return new InitialMenuOptionVM(stateOption);
