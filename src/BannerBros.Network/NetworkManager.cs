@@ -27,8 +27,8 @@ public class NetworkManager : INetEventListener
     public int LocalPeerId => _localPeerId;
     public MessageHandler Messages => _messageHandler;
 
-    public event Action<int>? OnPeerConnected;
-    public event Action<int, DisconnectReason>? OnPeerDisconnected;
+    public event Action<int>? PeerConnected;
+    public event Action<int, DisconnectReason>? PeerDisconnected;
 
     private NetworkManager()
     {
@@ -212,10 +212,10 @@ public class NetworkManager : INetEventListener
         }
 
         Console.WriteLine($"[BannerBros.Network] Peer {peerId} connected from {peer.Address}");
-        OnPeerConnected?.Invoke(peerId);
+        PeerConnected?.Invoke(peerId);
     }
 
-    public void OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
+    void INetEventListener.OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
     {
         var peerId = peer.Id;
         _peers.Remove(peerId);
@@ -229,30 +229,30 @@ public class NetworkManager : INetEventListener
         };
 
         Console.WriteLine($"[BannerBros.Network] Peer {peerId} disconnected: {disconnectInfo.Reason}");
-        OnPeerDisconnected?.Invoke(peerId, reason);
+        PeerDisconnected?.Invoke(peerId, reason);
     }
 
-    public void OnNetworkError(System.Net.IPEndPoint endPoint, System.Net.Sockets.SocketError socketError)
+    void INetEventListener.OnNetworkError(System.Net.IPEndPoint endPoint, System.Net.Sockets.SocketError socketError)
     {
         Console.WriteLine($"[BannerBros.Network] Network error: {socketError}");
     }
 
-    public void OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
+    void INetEventListener.OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
     {
         _packetProcessor.ReadAllPackets(reader, peer);
     }
 
-    public void OnNetworkReceiveUnconnected(System.Net.IPEndPoint remoteEndPoint, NetPacketReader reader, UnconnectedMessageType messageType)
+    void INetEventListener.OnNetworkReceiveUnconnected(System.Net.IPEndPoint remoteEndPoint, NetPacketReader reader, UnconnectedMessageType messageType)
     {
         // Handle unconnected messages (e.g., server discovery)
     }
 
-    public void OnNetworkLatencyUpdate(NetPeer peer, int latency)
+    void INetEventListener.OnNetworkLatencyUpdate(NetPeer peer, int latency)
     {
         // Track latency for each peer
     }
 
-    public void OnConnectionRequest(ConnectionRequest request)
+    void INetEventListener.OnConnectionRequest(ConnectionRequest request)
     {
         if (_peers.Count < _maxPlayers - 1) // -1 because host counts as 1
         {

@@ -51,8 +51,8 @@ public class SessionManager
         networkManager.Messages.OnPlayerStateReceived += HandlePlayerStateUpdate;
         networkManager.Messages.OnSessionEventReceived += HandleSessionEvent;
 
-        networkManager.OnPeerConnected += OnPeerConnected;
-        networkManager.OnPeerDisconnected += OnPeerDisconnected;
+        networkManager.PeerConnected += OnPeerConnected;
+        networkManager.PeerDisconnected += OnPeerDisconnected;
     }
 
     public void Cleanup()
@@ -68,8 +68,8 @@ public class SessionManager
         networkManager.Messages.OnPlayerStateReceived -= HandlePlayerStateUpdate;
         networkManager.Messages.OnSessionEventReceived -= HandleSessionEvent;
 
-        networkManager.OnPeerConnected -= OnPeerConnected;
-        networkManager.OnPeerDisconnected -= OnPeerDisconnected;
+        networkManager.PeerConnected -= OnPeerConnected;
+        networkManager.PeerDisconnected -= OnPeerDisconnected;
     }
 
     #region Host Methods
