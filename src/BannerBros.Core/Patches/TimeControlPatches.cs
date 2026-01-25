@@ -32,9 +32,9 @@ public static class TimeControlPatches
 
             // In co-op mode, always keep time running
             // Only allow Play mode, block Pause and Fast modes
+            // Note: Available modes vary by Bannerlord version
             if (value == CampaignTimeControlMode.Stop ||
                 value == CampaignTimeControlMode.UnstoppableFastForward ||
-                value == CampaignTimeControlMode.FastForward ||
                 value == CampaignTimeControlMode.UnstoppableFastForwardForPartyWaitTime)
             {
                 // Override to normal play speed

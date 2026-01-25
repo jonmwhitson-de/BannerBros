@@ -226,7 +226,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         // Send lightweight world sync
         var packet = new WorldSyncPacket
         {
-            CampaignTimeTicks = CampaignTime.Now.NumTicks,
+            CampaignTimeTicks = (long)(CampaignTime.Now.ToHours * 1000), // Convert to milliseconds for precision
             TimeMultiplier = module.Config.TimeSpeedMultiplier,
             Season = (int)CampaignTime.Now.GetSeasonOfYear,
             DayOfSeason = CampaignTime.Now.GetDayOfSeason,
@@ -307,7 +307,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
         var packet = new FullStateSyncPacket
         {
-            CampaignTimeTicks = CampaignTime.Now.NumTicks,
+            CampaignTimeTicks = (long)(CampaignTime.Now.ToHours * 1000), // Convert to milliseconds for precision
             Year = CampaignTime.Now.GetYear,
             Season = (int)CampaignTime.Now.GetSeasonOfYear,
             TimeMultiplier = module.Config.TimeSpeedMultiplier,

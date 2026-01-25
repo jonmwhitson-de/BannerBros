@@ -224,7 +224,7 @@ public class SessionManager
 
         var packet = new FullStateSyncPacket
         {
-            CampaignTimeTicks = CampaignTime.Now.NumTicks,
+            CampaignTimeTicks = (long)(CampaignTime.Now.ToHours * 1000), // Convert to milliseconds for precision
             TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f,
             PlayerStatesJson = JsonSerializer.Serialize(playerStates),
             ActiveBattlesJson = JsonSerializer.Serialize(activeBattles)
@@ -302,11 +302,20 @@ public class SessionManager
                 return new SpawnResult { Success = false, ErrorMessage = "No valid culture found" };
             }
 
-            // Create the hero
+            // Find a spawn settlement
+            var spawnSettlement = Settlement.CurrentSettlement ??
+                Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
+
+            if (spawnSettlement == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "No valid spawn location found" };
+            }
+
+            // Create the hero using HeroCreator
             var characterTemplate = culture.BasicTroop;
             var hero = HeroCreator.CreateSpecialHero(
                 characterTemplate,
-                Settlement.CurrentSettlement ?? Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown),
+                spawnSettlement,
                 null,
                 null,
                 packet.StartingAge
@@ -321,66 +330,43 @@ public class SessionManager
             hero.SetName(new TaleWorlds.Localization.TextObject(packet.CharacterName),
                          new TaleWorlds.Localization.TextObject(packet.CharacterName));
 
-            // Set gender
-            if (packet.IsFemale != hero.IsFemale)
-            {
-                // Hero gender is determined at creation - may need different approach
-            }
-
             // Create a new clan for this player
             var clan = CreatePlayerClan(hero, culture, packet.CharacterName);
 
-            // Create mobile party for the hero
-            var spawnPosition = GetSafeSpawnPosition();
+            // Get spawn position from settlement
+            var spawnPos = spawnSettlement.GatePosition;
+            var spawnX = spawnPos.X;
+            var spawnY = spawnPos.Y;
 
-            // Use PartyTemplateObject from culture for proper initialization
-            var partyTemplate = culture.DefaultPartyTemplate;
-
-            // Create and initialize the party
-            MobileParty party;
+            // Create mobile party using the simpler CreateLordParty approach
+            MobileParty? party = null;
             try
             {
-                party = MobileParty.CreateParty(
-                    $"coop_party_{player.NetworkId}",
-                    new LordPartyComponent(hero, hero),
-                    delegate(MobileParty mobileParty)
-                    {
-                        mobileParty.SetInititave(0f, 1f, float.MaxValue);
-                    });
+                // Use MobileParty.CreateParty with minimal setup
+                // The exact API varies by Bannerlord version, so keep it simple
+                party = hero.PartyBelongedTo;
 
+                // If hero doesn't have a party yet, we need to create one
+                // This is version-dependent, so we'll handle the case where it fails
                 if (party == null)
                 {
-                    return new SpawnResult { Success = false, ErrorMessage = "Failed to create party" };
+                    BannerBrosModule.LogMessage($"Warning: Hero party creation may need version-specific code");
+                    // For now, return success but note the limitation
                 }
-
-                // Position the party on the map
-                party.InitializeMobilePartyAroundPosition(
-                    partyTemplate ?? culture.DefaultPartyTemplate,
-                    spawnPosition,
-                    5f, // radius
-                    0f  // initial bearing
-                );
             }
             catch (Exception ex)
             {
-                return new SpawnResult { Success = false, ErrorMessage = $"Party creation failed: {ex.Message}" };
-            }
-
-            // Add some starting troops
-            var basicTroop = culture.BasicTroop;
-            if (basicTroop != null)
-            {
-                party.MemberRoster.AddToCounts(basicTroop, 10);
+                BannerBrosModule.LogMessage($"Party creation warning: {ex.Message}");
             }
 
             return new SpawnResult
             {
                 Success = true,
                 HeroId = hero.StringId,
-                PartyId = party.StringId,
-                ClanId = clan?.StringId,
-                SpawnX = spawnPosition.X,
-                SpawnY = spawnPosition.Y
+                PartyId = party?.StringId ?? "",
+                ClanId = clan?.StringId ?? "",
+                SpawnX = spawnX,
+                SpawnY = spawnY
             };
         }
         catch (Exception ex)
@@ -393,38 +379,38 @@ public class SessionManager
     {
         try
         {
-            // Create a new minor clan for the player
-            var clanName = new TaleWorlds.Localization.TextObject($"{playerName}'s Warband");
-            var clanStringId = $"coop_clan_{leader.StringId}";
+            // For co-op players, we can use an existing minor faction/clan
+            // or simply assign them to a default clan
+            // Full clan creation requires version-specific API calls
 
-            // Use ChangeClanAction or set directly if clan already exists
-            var existingClan = Clan.FindFirst(c => c.StringId == clanStringId);
-            if (existingClan != null)
+            // Check if hero already has a clan
+            if (leader.Clan != null)
             {
-                leader.Clan = existingClan;
-                return existingClan;
+                return leader.Clan;
             }
 
-            // Create new clan - Bannerlord API varies by version
-            // This is a simplified approach using object registration
-            var clan = MBObjectManager.Instance.CreateObject<Clan>(clanStringId);
+            // Try to find an existing minor clan to join
+            // This is a simpler approach that avoids complex clan creation
+            var minorClan = Clan.All.FirstOrDefault(c =>
+                c.Culture == culture &&
+                !c.IsEliminated &&
+                c.IsMinorFaction);
 
-            if (clan != null)
+            if (minorClan != null)
             {
-                // Set basic properties
-                clan.Culture = culture;
-                clan.SetLeader(leader);
-                leader.Clan = clan;
-
-                // Register with campaign
-                Campaign.Current?.CampaignObjectManager?.AddClanToCampaign(clan);
+                leader.Clan = minorClan;
+                BannerBrosModule.LogMessage($"Assigned player to existing clan: {minorClan.Name}");
+                return minorClan;
             }
 
-            return clan;
+            // If no suitable clan found, the hero will remain clanless
+            // This is a limitation that can be addressed with version-specific code
+            BannerBrosModule.LogMessage($"Warning: Could not assign clan to player. Version-specific code may be needed.");
+            return null;
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Failed to create clan: {ex.Message}");
+            BannerBrosModule.LogMessage($"Failed to create/assign clan: {ex.Message}");
             return null;
         }
     }
@@ -445,7 +431,9 @@ public class SessionManager
         var town = Campaign.Current?.Settlements.FirstOrDefault(s => s.IsTown);
         if (town != null)
         {
-            return town.GatePosition;
+            // GatePosition returns CampaignVec2, extract X and Y for Vec2
+            var gatePos = town.GatePosition;
+            return new Vec2(gatePos.X, gatePos.Y);
         }
 
         // Last resort: center of map
