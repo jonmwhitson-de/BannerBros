@@ -33,7 +33,7 @@ public class ClientModule : MBSubModuleBase
         HUDManager = new PlayerHUDManager();
         MapMarkers = new PlayerMapMarkers();
         InitializeHarmony(); // RE-ENABLED - adds menu buttons
-        // SubscribeToSessionEvents(); // Still disabled
+        SubscribeToSessionEvents(); // RE-ENABLED - join flow
 
         BannerBrosModule.LogMessage("Client module loaded");
     }
