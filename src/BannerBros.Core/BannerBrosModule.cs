@@ -49,8 +49,9 @@ public class BannerBrosModule : MBSubModuleBase
         try
         {
             _harmony = new Harmony(HarmonyId);
-            _harmony.PatchAll(typeof(BannerBrosModule).Assembly);
-            LogMessage("Harmony patches applied");
+            // Temporarily disable patches to isolate crash
+            // _harmony.PatchAll(typeof(BannerBrosModule).Assembly);
+            LogMessage("Harmony patches DISABLED for testing");
         }
         catch (Exception ex)
         {
