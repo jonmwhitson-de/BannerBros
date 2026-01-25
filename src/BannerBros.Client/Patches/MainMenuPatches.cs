@@ -119,13 +119,14 @@ public static class MainMenuPatches
 
 /// <summary>
 /// Patches to add co-op status to the escape menu during gameplay.
+/// DISABLED: Causes crashes in some Bannerlord versions.
 /// </summary>
 public static class EscapeMenuPatches
 {
     /// <summary>
     /// Adds co-op options to the in-game escape menu.
     /// </summary>
-    [HarmonyPatch(typeof(EscapeMenuVM), MethodType.Constructor)]
+    // [HarmonyPatch(typeof(EscapeMenuVM), MethodType.Constructor)] // DISABLED - causes crash
     public static class EscapeMenuConstructorPatch
     {
         public static void Postfix(EscapeMenuVM __instance)
