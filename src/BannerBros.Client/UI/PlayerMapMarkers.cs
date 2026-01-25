@@ -35,6 +35,11 @@ public class PlayerMapMarkers
 
     public void Update(float dt)
     {
+        // DISABLED: Scene manipulation causes crashes in some Bannerlord versions
+        // TODO: Re-enable with proper version checks
+        return;
+
+        /*
         if (!_initialized || _mapScene == null) return;
 
         var module = BannerBrosModule.Instance;
@@ -72,6 +77,7 @@ public class PlayerMapMarkers
             _markers[id].Dispose();
             _markers.Remove(id);
         }
+        */
     }
 
     private PlayerMarkerEntity CreateMarker(CoopPlayer player)
