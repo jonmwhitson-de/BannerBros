@@ -106,12 +106,11 @@ public class BannerBrosModule : MBSubModuleBase
 
     private void InitializeCampaignBehaviors(CampaignGameStarter starter)
     {
-        // Testing one at a time
         starter.AddBehavior(new BannerBrosCampaignBehavior());
         starter.AddBehavior(new TimeControlBehavior());
         starter.AddBehavior(new BattleJoinBehavior());
-        // starter.AddBehavior(new PlayerProtectionBehavior());
-        LogMessage("Testing: +BattleJoinBehavior");
+        starter.AddBehavior(new PlayerProtectionBehavior());
+        LogMessage("All campaign behaviors loaded");
     }
 
     public void HostSession(int port = 7777)
