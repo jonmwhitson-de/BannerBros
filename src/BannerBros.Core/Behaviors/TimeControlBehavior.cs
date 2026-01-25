@@ -30,7 +30,7 @@ public class TimeControlBehavior : CampaignBehaviorBase
         _targetTimeMultiplier = module.Config.TimeSpeedMultiplier;
 
         // Clamp to valid range (0.5x to 4x)
-        _targetTimeMultiplier = Math.Clamp(_targetTimeMultiplier, 0.5f, 4.0f);
+        _targetTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, _targetTimeMultiplier));
 
         // Override the game's time controls
         EnforceTimeMultiplier();
@@ -55,7 +55,7 @@ public class TimeControlBehavior : CampaignBehaviorBase
 
     public void SetTimeMultiplier(float multiplier)
     {
-        _targetTimeMultiplier = Math.Clamp(multiplier, 0.5f, 4.0f);
+        _targetTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, multiplier));
 
         if (BannerBrosModule.Instance?.IsHost == true)
         {

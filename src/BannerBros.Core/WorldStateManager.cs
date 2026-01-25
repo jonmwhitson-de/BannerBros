@@ -21,7 +21,7 @@ public class WorldStateManager
 
     public string CreateBattle(int initiatorPlayerId, string mapPosition, BattleSide initiatorSide)
     {
-        var battleId = Guid.NewGuid().ToString("N")[..8];
+        var battleId = Guid.NewGuid().ToString("N").Substring(0, 8);
         var battle = new BattleInstance
         {
             BattleId = battleId,
