@@ -213,7 +213,7 @@ public class ClientModule : MBSubModuleBase
         if (module == null) return;
 
         // Determine which side to join based on initiator's side
-        var initiatorSide = battle.PlayerSides.GetValueOrDefault(battle.InitiatorPlayerId, BattleSide.Attacker);
+        var initiatorSide = battle.PlayerSides.TryGetValue(battle.InitiatorPlayerId, out var side) ? side : BattleSide.Attacker;
         var joinSide = asAlly ? initiatorSide :
             (initiatorSide == BattleSide.Attacker ? BattleSide.Defender : BattleSide.Attacker);
 
