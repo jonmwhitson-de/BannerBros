@@ -106,12 +106,12 @@ public class BannerBrosModule : MBSubModuleBase
 
     private void InitializeCampaignBehaviors(CampaignGameStarter starter)
     {
-        // RE-ENABLING one at a time
-        starter.AddBehavior(new BannerBrosCampaignBehavior());
-        starter.AddBehavior(new TimeControlBehavior());
-        starter.AddBehavior(new BattleJoinBehavior());
+        // DISABLED: Testing if behaviors cause Host crash
+        // starter.AddBehavior(new BannerBrosCampaignBehavior());
+        // starter.AddBehavior(new TimeControlBehavior());
+        // starter.AddBehavior(new BattleJoinBehavior());
         // starter.AddBehavior(new PlayerProtectionBehavior());
-        LogMessage("Campaign behaviors: BannerBros + TimeControl + BattleJoin enabled");
+        LogMessage("Campaign behaviors DISABLED for host test");
     }
 
     public void HostSession(int port = 7777)
