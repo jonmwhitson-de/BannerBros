@@ -106,17 +106,16 @@ public class ClientModule : MBSubModuleBase
     {
         base.OnSubModuleUnloaded();
 
-        // Unsubscribe from session events
-        var sessionManager = BannerBrosModule.Instance?.SessionManager;
-        if (sessionManager != null)
-        {
-            sessionManager.OnCharacterCreationRequired -= OnCharacterCreationRequired;
-            sessionManager.OnPlayerSpawned -= OnPlayerSpawned;
-            sessionManager.OnJoinRejected -= OnJoinRejected;
-        }
-
-        _harmony?.UnpatchAll(HarmonyId);
-        MapMarkers.Cleanup();
+        // Only cleanup if initialized
+        // var sessionManager = BannerBrosModule.Instance?.SessionManager;
+        // if (sessionManager != null)
+        // {
+        //     sessionManager.OnCharacterCreationRequired -= OnCharacterCreationRequired;
+        //     sessionManager.OnPlayerSpawned -= OnPlayerSpawned;
+        //     sessionManager.OnJoinRejected -= OnJoinRejected;
+        // }
+        // _harmony?.UnpatchAll(HarmonyId);
+        // MapMarkers?.Cleanup();
         Instance = null;
     }
 

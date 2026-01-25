@@ -63,12 +63,11 @@ public class BannerBrosModule : MBSubModuleBase
     {
         base.OnSubModuleUnloaded();
 
-        SessionManager?.Cleanup();
-        _harmony?.UnpatchAll(HarmonyId);
-        Config.Save();
+        // Only cleanup if initialized
+        // SessionManager?.Cleanup();
+        // _harmony?.UnpatchAll(HarmonyId);
+        // Config?.Save();
         Instance = null;
-
-        LogMessage("BannerBros unloaded");
     }
 
     protected override void OnBeforeInitialModuleScreenSetAsRoot()

@@ -24,7 +24,8 @@ public class NetworkModule : MBSubModuleBase
     {
         base.OnSubModuleUnloaded();
 
-        NetworkManager.Shutdown();
+        // Only shutdown if it was initialized
+        // NetworkManager.Shutdown();
         Instance = null;
     }
 
