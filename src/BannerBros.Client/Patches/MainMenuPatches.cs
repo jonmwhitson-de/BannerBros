@@ -126,7 +126,7 @@ public static class EscapeMenuPatches
     /// <summary>
     /// Adds co-op options to the in-game escape menu.
     /// </summary>
-    // [HarmonyPatch(typeof(EscapeMenuVM), MethodType.Constructor)] // DISABLED - causes crash
+    [HarmonyPatch(typeof(EscapeMenuVM), MethodType.Constructor)]
     public static class EscapeMenuConstructorPatch
     {
         public static void Postfix(EscapeMenuVM __instance)
