@@ -126,12 +126,12 @@ public static class EscapeMenuPatches
     /// <summary>
     /// Adds co-op options to the in-game escape menu.
     /// </summary>
-    [HarmonyPatch(typeof(EscapeMenuVM), MethodType.Constructor)]
-    public static class EscapeMenuConstructorPatch
+    [HarmonyPatch(typeof(EscapeMenuVM), "RefreshItems")]
+    public static class EscapeMenuRefreshPatch
     {
         public static void Postfix(EscapeMenuVM __instance)
         {
-            BannerBrosModule.LogMessage("EscapeMenuVM patch triggered");
+            BannerBrosModule.LogMessage("EscapeMenuVM RefreshItems patch triggered");
 
             var module = BannerBrosModule.Instance;
             if (module?.IsConnected != true)
