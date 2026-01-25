@@ -16,7 +16,8 @@ public class NetworkModule : MBSubModuleBase
         base.OnSubModuleLoad();
         Instance = this;
 
-        NetworkManager.Initialize();
+        // DISABLED: Testing if NetworkManager init causes crash
+        // NetworkManager.Initialize();
     }
 
     protected override void OnSubModuleUnloaded()
