@@ -78,7 +78,7 @@ public static class MainMenuExtension
                 OnJoinConfirmed,
                 null,
                 false,
-                text => !string.IsNullOrWhiteSpace(text),
+                text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
                 "",
                 BannerBrosModule.Instance?.Config.LastServerAddress ?? ""
             )

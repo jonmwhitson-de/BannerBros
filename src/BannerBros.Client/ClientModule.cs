@@ -1,5 +1,6 @@
 using HarmonyLib;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 using BannerBros.Client.UI;

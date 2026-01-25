@@ -45,7 +45,7 @@ public static class CharacterCreationUI
                 OnNameEntered,
                 OnCreationCancelled,
                 false,
-                text => !string.IsNullOrWhiteSpace(text) && text.Length >= 2 && text.Length <= 30,
+                text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text) && text.Length >= 2 && text.Length <= 30, "Name must be 2-30 characters"),
                 "",
                 _characterName
             )
