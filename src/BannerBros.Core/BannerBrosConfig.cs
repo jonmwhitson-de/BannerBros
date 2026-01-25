@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Newtonsoft.Json;
 
 namespace BannerBros.Core;
 
@@ -61,7 +61,7 @@ public class BannerBrosConfig
             if (File.Exists(ConfigPath))
             {
                 var json = File.ReadAllText(ConfigPath);
-                return JsonSerializer.Deserialize<BannerBrosConfig>(json) ?? new BannerBrosConfig();
+                return JsonConvert.DeserializeObject<BannerBrosConfig>(json) ?? new BannerBrosConfig();
             }
         }
         catch (Exception ex)
@@ -82,8 +82,7 @@ public class BannerBrosConfig
                 Directory.CreateDirectory(directory);
             }
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            var json = JsonSerializer.Serialize(this, options);
+            var json = JsonConvert.SerializeObject(this, Formatting.Indented);
             File.WriteAllText(ConfigPath, json);
         }
         catch (Exception ex)

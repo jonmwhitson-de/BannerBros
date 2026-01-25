@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Newtonsoft.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
@@ -169,7 +169,7 @@ public class SessionManager
             Accepted = true,
             AssignedPlayerId = playerId,
             RequiresCharacterCreation = requiresCharacterCreation,
-            ExistingPlayersJson = JsonSerializer.Serialize(GetConnectedPlayerInfos())
+            ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
         };
 
         // Send response
@@ -249,8 +249,8 @@ public class SessionManager
         {
             CampaignTimeTicks = (long)(CampaignTime.Now.ToHours * 1000), // Convert to milliseconds for precision
             TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f,
-            PlayerStatesJson = JsonSerializer.Serialize(playerStates),
-            ActiveBattlesJson = JsonSerializer.Serialize(activeBattles)
+            PlayerStatesJson = JsonConvert.SerializeObject(playerStates),
+            ActiveBattlesJson = JsonConvert.SerializeObject(activeBattles)
         };
 
         NetworkManager.Instance?.SendTo(peerId, packet);
@@ -580,7 +580,7 @@ public class SessionManager
         // Add existing players
         if (!string.IsNullOrEmpty(packet.ExistingPlayersJson))
         {
-            var existingPlayers = JsonSerializer.Deserialize<List<ConnectedPlayerInfo>>(packet.ExistingPlayersJson);
+            var existingPlayers = JsonConvert.DeserializeObject<List<ConnectedPlayerInfo>>(packet.ExistingPlayersJson);
             if (existingPlayers != null)
             {
                 foreach (var playerInfo in existingPlayers)
@@ -665,7 +665,7 @@ public class SessionManager
         {
             try
             {
-                playerStates = JsonSerializer.Deserialize<List<PlayerStatePacket>>(packet.PlayerStatesJson)
+                playerStates = JsonConvert.DeserializeObject<List<PlayerStatePacket>>(packet.PlayerStatesJson)
                     ?? new List<PlayerStatePacket>();
             }
             catch (Exception ex)

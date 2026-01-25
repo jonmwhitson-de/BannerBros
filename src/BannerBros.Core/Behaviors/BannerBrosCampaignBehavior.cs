@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Newtonsoft.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -316,8 +316,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                     BattleId = battle.BattleId,
                     MapPosition = battle.MapPosition,
                     InitiatorPlayerId = battle.InitiatorPlayerId,
-                    AttackerPlayerIdsJson = JsonSerializer.Serialize(battle.GetPlayersOnSide(BattleSide.Attacker).ToList()),
-                    DefenderPlayerIdsJson = JsonSerializer.Serialize(battle.GetPlayersOnSide(BattleSide.Defender).ToList())
+                    AttackerPlayerIdsJson = JsonConvert.SerializeObject(battle.GetPlayersOnSide(BattleSide.Attacker).ToList()),
+                    DefenderPlayerIdsJson = JsonConvert.SerializeObject(battle.GetPlayersOnSide(BattleSide.Defender).ToList())
                 });
             }
 
@@ -329,7 +329,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 Season = (int)CampaignTime.Now.GetSeasonOfYear,
                 DayOfSeason = CampaignTime.Now.GetDayOfSeason,
                 ActiveBattleCount = battles.Count,
-                BattleDataJson = JsonSerializer.Serialize(battles)
+                BattleDataJson = JsonConvert.SerializeObject(battles)
             };
 
             networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
@@ -416,9 +416,9 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 Year = CampaignTime.Now.GetYear,
                 Season = (int)CampaignTime.Now.GetSeasonOfYear,
                 TimeMultiplier = module.Config.TimeSpeedMultiplier,
-                PlayerStatesJson = JsonSerializer.Serialize(playerStates),
-                ActiveBattlesJson = JsonSerializer.Serialize(activeBattles),
-                DiplomacyStatesJson = JsonSerializer.Serialize(diplomacyStates)
+                PlayerStatesJson = JsonConvert.SerializeObject(playerStates),
+                ActiveBattlesJson = JsonConvert.SerializeObject(activeBattles),
+                DiplomacyStatesJson = JsonConvert.SerializeObject(diplomacyStates)
             };
 
             networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
