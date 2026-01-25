@@ -32,7 +32,7 @@ public class ClientModule : MBSubModuleBase
         MenuManager = new CoopMenuManager();
         HUDManager = new PlayerHUDManager();
         MapMarkers = new PlayerMapMarkers();
-        // InitializeHarmony(); // Still disabled
+        InitializeHarmony(); // RE-ENABLED - adds menu buttons
         // SubscribeToSessionEvents(); // Still disabled
 
         BannerBrosModule.LogMessage("Client module loaded");
@@ -92,9 +92,9 @@ public class ClientModule : MBSubModuleBase
         try
         {
             _harmony = new Harmony(HarmonyId);
-            // DISABLED: All patches disabled to isolate crash
-            // _harmony.PatchAll(typeof(ClientModule).Assembly);
-            BannerBrosModule.LogMessage("Client Harmony patches DISABLED for testing");
+            // RE-ENABLED - EscapeMenuPatch still disabled in patch file
+            _harmony.PatchAll(typeof(ClientModule).Assembly);
+            BannerBrosModule.LogMessage("Client Harmony patches applied");
         }
         catch (Exception ex)
         {
