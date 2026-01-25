@@ -131,18 +131,10 @@ public class ClientModule : MBSubModuleBase
     {
         base.OnApplicationTick(dt);
 
-        // DISABLED: Isolating crash cause
-        // TODO: Re-enable after fixing crashes
-        /*
-        // Update HUD elements
+        // RE-ENABLED
         HUDManager.Update(dt);
-
-        // Update map markers
         MapMarkers.Update(dt);
-
-        // Handle input for co-op features
         HandleCoopInput();
-        */
     }
 
     private void HandleCoopInput()
