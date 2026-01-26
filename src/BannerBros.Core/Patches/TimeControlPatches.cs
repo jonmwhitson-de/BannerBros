@@ -30,12 +30,15 @@ public static class TimeControlPatches
         {
             if (!IsTimeControlEnforced) return true;
 
+            BannerBrosModule.LogMessage($"TimeControlMode change blocked: {value} -> StoppablePlay");
+
             // In co-op mode, always keep time running
             // Only allow Play mode, block Pause and Fast modes
-            // Note: Available modes vary by Bannerlord version
             if (value == CampaignTimeControlMode.Stop ||
                 value == CampaignTimeControlMode.UnstoppableFastForward ||
-                value == CampaignTimeControlMode.UnstoppableFastForwardForPartyWaitTime)
+                value == CampaignTimeControlMode.UnstoppableFastForwardForPartyWaitTime ||
+                value == CampaignTimeControlMode.FastForward ||
+                value == CampaignTimeControlMode.StoppableFastForward)
             {
                 // Override to normal play speed
                 value = CampaignTimeControlMode.StoppablePlay;
