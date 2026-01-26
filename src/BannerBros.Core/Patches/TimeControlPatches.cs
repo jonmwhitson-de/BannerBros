@@ -5,7 +5,7 @@ using TaleWorlds.Library;
 namespace BannerBros.Core.Patches;
 
 /// <summary>
-/// Patches to hide time control UI during co-op mode.
+/// Patches to control time during co-op mode.
 /// Time flows constantly at host's configured rate.
 /// </summary>
 public static class TimeControlPatches
@@ -14,6 +14,27 @@ public static class TimeControlPatches
     /// Gets whether we're in a co-op session.
     /// </summary>
     public static bool IsInCoopSession => BannerBrosModule.Instance?.IsConnected == true;
+
+    /// <summary>
+    /// Prevents the game from pausing by intercepting TimeControlMode setter.
+    /// </summary>
+    [HarmonyPatch(typeof(Campaign), nameof(Campaign.TimeControlMode), MethodType.Setter)]
+    public static class PreventPausePatch
+    {
+        public static bool Prefix(ref CampaignTimeControlMode value)
+        {
+            if (!IsInCoopSession) return true;
+
+            // Block any attempt to stop/pause time
+            if (value == CampaignTimeControlMode.Stop)
+            {
+                BannerBrosModule.LogMessage("Co-op: Time cannot be paused");
+                value = CampaignTimeControlMode.StoppablePlay;
+            }
+
+            return true;
+        }
+    }
 }
 
 /// <summary>
