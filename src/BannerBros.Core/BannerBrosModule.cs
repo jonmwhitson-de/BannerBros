@@ -92,7 +92,8 @@ public class BannerBrosModule : MBSubModuleBase
             // Set mode AND speed every frame to override game's attempts to pause
             if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
             {
-                campaign.SetTimeSpeed(Config.TimeSpeedMultiplier);
+                // SetTimeSpeed takes int: 0=pause, 1=play, 2=fast
+                campaign.SetTimeSpeed(1);
             }
         }
         catch (Exception ex)
