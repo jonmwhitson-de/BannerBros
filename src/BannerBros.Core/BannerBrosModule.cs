@@ -90,7 +90,8 @@ public class BannerBrosModule : MBSubModuleBase
 
             // Force time to run EVERY frame - game constantly tries to pause
             // SetTimeSpeed: 0=pause, 1=play, 2=fast forward
-            campaign.SetTimeSpeed(1);
+            int speed = GetTimeSpeedFromConfig();
+            campaign.SetTimeSpeed(speed);
         }
         catch
         {
@@ -107,6 +108,36 @@ public class BannerBrosModule : MBSubModuleBase
             {
                 // Ignore
             }
+        }
+    }
+
+    /// <summary>
+    /// Maps config TimeSpeedMultiplier to game's speed int.
+    /// 1.0 = normal (1), 2.0+ = fast forward (2)
+    /// </summary>
+    private int GetTimeSpeedFromConfig()
+    {
+        var multiplier = Config.TimeSpeedMultiplier;
+        if (multiplier >= 2.0f) return 2; // Fast forward
+        return 1; // Normal play
+    }
+
+    /// <summary>
+    /// Cycles time speed between normal and fast (host only).
+    /// </summary>
+    public void CycleTimeSpeed()
+    {
+        if (!IsHost) return;
+
+        if (Config.TimeSpeedMultiplier >= 2.0f)
+        {
+            Config.TimeSpeedMultiplier = 1.0f;
+            LogMessage("Time speed: Normal (1x)");
+        }
+        else
+        {
+            Config.TimeSpeedMultiplier = 2.0f;
+            LogMessage("Time speed: Fast (2x)");
         }
     }
 

@@ -145,6 +145,12 @@ public class ClientModule : MBSubModuleBase
         // Battle joining is handled through the game's normal encounter system
         // Players approach battles on the map like they would NPC battles
 
+        // T - Cycle time speed (host only)
+        if (Input.IsKeyPressed(InputKey.T))
+        {
+            module.CycleTimeSpeed();
+        }
+
         // P - Show player list (TODO: may need different key if conflicts)
         if (Input.IsKeyPressed(InputKey.P))
         {
