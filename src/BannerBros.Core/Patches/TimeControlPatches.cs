@@ -36,9 +36,7 @@ public static class TimeControlPatches
             // Only allow Play mode, block Pause and Fast modes
             if (value == CampaignTimeControlMode.Stop ||
                 value == CampaignTimeControlMode.UnstoppableFastForward ||
-                value == CampaignTimeControlMode.UnstoppableFastForwardForPartyWaitTime ||
-                value == CampaignTimeControlMode.FastForward ||
-                value == CampaignTimeControlMode.StoppableFastForward)
+                value == CampaignTimeControlMode.UnstoppableFastForwardForPartyWaitTime)
             {
                 // Override to normal play speed
                 value = CampaignTimeControlMode.StoppablePlay;
