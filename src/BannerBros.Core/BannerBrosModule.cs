@@ -67,6 +67,9 @@ public class BannerBrosModule : MBSubModuleBase
         Instance = null;
     }
 
+    private float _timeCheckTimer;
+    private bool _hasLoggedTimeMode;
+
     protected override void OnApplicationTick(float dt)
     {
         base.OnApplicationTick(dt);
@@ -85,16 +88,30 @@ public class BannerBrosModule : MBSubModuleBase
             var campaign = Campaign.Current;
             if (campaign == null) return;
 
-            // Force time to run - never allow pause in co-op
-            if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
+            var currentMode = campaign.TimeControlMode;
+
+            // Debug: log current mode once per second
+            _timeCheckTimer += 0.016f; // ~60fps
+            if (_timeCheckTimer > 1.0f)
             {
+                _timeCheckTimer = 0;
+                if (!_hasLoggedTimeMode)
+                {
+                    LogMessage($"TimeControlMode = {currentMode}");
+                    _hasLoggedTimeMode = true;
+                }
+            }
+
+            // Force time to run - never allow pause in co-op
+            if (currentMode == CampaignTimeControlMode.Stop)
+            {
+                LogMessage($"Forcing time from {currentMode} to StoppablePlay");
                 campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
-                LogMessage("Co-op: Auto-resumed time");
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore errors during time enforcement
+            LogMessage($"EnforceTimeControl error: {ex.Message}");
         }
     }
 
