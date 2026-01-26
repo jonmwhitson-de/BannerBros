@@ -52,8 +52,8 @@ public static class MainMenuExtension
             "Select game speed for your co-op session:\n\n(This controls how fast time passes on the campaign map)",
             new List<InquiryElement>
             {
-                new("1", "Normal (1x)", null, currentSpeed < 2.0f),
-                new("2", "Fast (2x)", null, currentSpeed >= 2.0f),
+                new InquiryElement("1", "Normal (1x)", null, currentSpeed < 2.0f, "Standard campaign speed"),
+                new InquiryElement("2", "Fast (2x)", null, currentSpeed >= 2.0f, "Double speed campaign"),
             },
             true,
             1,
