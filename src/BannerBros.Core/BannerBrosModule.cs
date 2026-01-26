@@ -88,30 +88,29 @@ public class BannerBrosModule : MBSubModuleBase
             var campaign = Campaign.Current;
             if (campaign == null) return;
 
-            var currentMode = campaign.TimeControlMode;
-
-            // Debug: log current mode once per second
-            _timeCheckTimer += 0.016f; // ~60fps
-            if (_timeCheckTimer > 1.0f)
+            // Force time to always run at configured speed
+            // Set mode AND speed every frame to override game's attempts to pause
+            if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
             {
-                _timeCheckTimer = 0;
-                if (!_hasLoggedTimeMode)
-                {
-                    LogMessage($"TimeControlMode = {currentMode}");
-                    _hasLoggedTimeMode = true;
-                }
-            }
-
-            // Force time to run - never allow pause in co-op
-            if (currentMode == CampaignTimeControlMode.Stop)
-            {
-                LogMessage($"Forcing time from {currentMode} to StoppablePlay");
-                campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
+                campaign.SetTimeSpeed(Config.TimeSpeedMultiplier);
             }
         }
         catch (Exception ex)
         {
-            LogMessage($"EnforceTimeControl error: {ex.Message}");
+            // SetTimeSpeed might not exist, try direct property
+            try
+            {
+                var campaign = Campaign.Current;
+                if (campaign?.TimeControlMode == CampaignTimeControlMode.Stop)
+                {
+                    campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
+                    campaign.SpeedUpMultiplier = Config.TimeSpeedMultiplier;
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
         }
     }
 
