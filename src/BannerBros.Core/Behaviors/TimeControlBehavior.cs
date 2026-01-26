@@ -4,13 +4,11 @@ namespace BannerBros.Core;
 
 /// <summary>
 /// Controls campaign time to ensure synchronized real-time progression.
-/// Prevents individual players from pausing or speeding up time.
+/// In co-op mode, time flows constantly at the host's configured rate.
 /// </summary>
 public class TimeControlBehavior : CampaignBehaviorBase
 {
-    private float _targetTimeMultiplier = 1.0f;
-    private CampaignTimeControlMode _lastEnforcedMode;
-    private bool _hasLoggedEnforcement;
+    private float _hostTimeMultiplier = 1.0f;
 
     public override void RegisterEvents()
     {
@@ -29,65 +27,51 @@ public class TimeControlBehavior : CampaignBehaviorBase
 
         if (Campaign.Current == null) return;
 
-        // Get configured time multiplier from server/config
-        _targetTimeMultiplier = module.Config.TimeSpeedMultiplier;
-        _targetTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, _targetTimeMultiplier));
+        // Get host's configured time multiplier
+        _hostTimeMultiplier = module.Config.TimeSpeedMultiplier;
+        _hostTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, _hostTimeMultiplier));
 
-        // Actively enforce time control every tick
-        EnforceTimeControl();
+        // Force time to always run at constant rate
+        ForceConstantTimeFlow();
     }
 
-    private void EnforceTimeControl()
+    private void ForceConstantTimeFlow()
     {
         var campaign = Campaign.Current;
         if (campaign == null) return;
 
-        // Get current time control mode
-        var currentMode = campaign.TimeControlMode;
-
-        // In co-op, we want time to always run (never paused)
-        // StoppablePlay = normal speed, player can pause (but we'll override)
-        // We force it to StoppablePlay if it's stopped
-        if (currentMode == CampaignTimeControlMode.Stop)
+        // Always keep time running - never allow pause
+        if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
         {
             campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
-
-            if (!_hasLoggedEnforcement)
-            {
-                BannerBrosModule.LogMessage("Co-op: Time cannot be paused");
-                _hasLoggedEnforcement = true;
-            }
-        }
-        else
-        {
-            _hasLoggedEnforcement = false;
         }
 
-        // Enforce speed multiplier
-        // Note: SpeedUpMultiplier might not exist in all versions
+        // Force the host's time multiplier
         try
         {
-            if (Math.Abs(campaign.SpeedUpMultiplier - _targetTimeMultiplier) > 0.01f)
-            {
-                campaign.SpeedUpMultiplier = _targetTimeMultiplier;
-            }
+            campaign.SpeedUpMultiplier = _hostTimeMultiplier;
         }
         catch
         {
-            // SpeedUpMultiplier might not exist in this version
+            // Property might not exist in this version
         }
     }
 
+    /// <summary>
+    /// Called by host to change the time multiplier for all players.
+    /// </summary>
     public void SetTimeMultiplier(float multiplier)
     {
-        _targetTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, multiplier));
+        _hostTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, multiplier));
 
-        if (BannerBrosModule.Instance?.IsHost == true)
+        var module = BannerBrosModule.Instance;
+        if (module?.IsHost == true)
         {
-            BannerBrosModule.Instance.Config.TimeSpeedMultiplier = _targetTimeMultiplier;
-            BannerBrosModule.LogMessage($"Time speed set to {_targetTimeMultiplier}x");
+            module.Config.TimeSpeedMultiplier = _hostTimeMultiplier;
+            BannerBrosModule.LogMessage($"Time speed set to {_hostTimeMultiplier}x");
+            // TODO: Broadcast to clients via network
         }
     }
 
-    public float GetTimeMultiplier() => _targetTimeMultiplier;
+    public float GetTimeMultiplier() => _hostTimeMultiplier;
 }
