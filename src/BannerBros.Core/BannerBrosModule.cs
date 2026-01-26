@@ -67,6 +67,37 @@ public class BannerBrosModule : MBSubModuleBase
         Instance = null;
     }
 
+    protected override void OnApplicationTick(float dt)
+    {
+        base.OnApplicationTick(dt);
+
+        // Enforce time control even when game is paused
+        if (IsConnected && Campaign.Current != null)
+        {
+            EnforceTimeControl();
+        }
+    }
+
+    private void EnforceTimeControl()
+    {
+        try
+        {
+            var campaign = Campaign.Current;
+            if (campaign == null) return;
+
+            // Force time to run - never allow pause in co-op
+            if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
+            {
+                campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
+                LogMessage("Co-op: Auto-resumed time");
+            }
+        }
+        catch
+        {
+            // Ignore errors during time enforcement
+        }
+    }
+
     protected override void OnBeforeInitialModuleScreenSetAsRoot()
     {
         base.OnBeforeInitialModuleScreenSetAsRoot();
