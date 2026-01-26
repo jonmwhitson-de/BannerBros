@@ -88,24 +88,19 @@ public class BannerBrosModule : MBSubModuleBase
             var campaign = Campaign.Current;
             if (campaign == null) return;
 
-            // Force time to always run at configured speed
-            // Set mode AND speed every frame to override game's attempts to pause
-            if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
-            {
-                // SetTimeSpeed takes int: 0=pause, 1=play, 2=fast
-                campaign.SetTimeSpeed(1);
-            }
+            // Force time to run EVERY frame - game constantly tries to pause
+            // SetTimeSpeed: 0=pause, 1=play, 2=fast forward
+            campaign.SetTimeSpeed(1);
         }
-        catch (Exception ex)
+        catch
         {
             // SetTimeSpeed might not exist, try direct property
             try
             {
                 var campaign = Campaign.Current;
-                if (campaign?.TimeControlMode == CampaignTimeControlMode.Stop)
+                if (campaign != null)
                 {
                     campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
-                    campaign.SpeedUpMultiplier = Config.TimeSpeedMultiplier;
                 }
             }
             catch
