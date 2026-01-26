@@ -33,23 +33,71 @@ public static class MainMenuExtension
     {
         try
         {
-            var inquiry = new InquiryData(
-                "Host Co-op Session",
-                "Start a new co-op campaign or host an existing save.\n\nOther players will be able to join your game.",
-                true,
-                true,
-                "Host New Campaign",
-                "Cancel",
-                OnHostNewCampaign,
-                null
-            );
-
-            InformationManager.ShowInquiry(inquiry, true);
+            // First, show speed selection
+            ShowHostSpeedSelection();
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"Error showing host dialog: {ex.Message}");
         }
+    }
+
+    private static void ShowHostSpeedSelection()
+    {
+        var module = BannerBrosModule.Instance;
+        var currentSpeed = module?.Config.TimeSpeedMultiplier ?? 1.0f;
+
+        var inquiry = new MultiSelectionInquiryData(
+            "Host Co-op Session",
+            "Select game speed for your co-op session:\n\n(This controls how fast time passes on the campaign map)",
+            new List<InquiryElement>
+            {
+                new("1", "Normal (1x)", null, currentSpeed < 2.0f),
+                new("2", "Fast (2x)", null, currentSpeed >= 2.0f),
+            },
+            true,
+            1,
+            1,
+            "Continue",
+            "Cancel",
+            OnHostSpeedSelected,
+            null
+        );
+
+        MBInformationManager.ShowMultiSelectionInquiry(inquiry, true);
+    }
+
+    private static void OnHostSpeedSelected(List<InquiryElement> selected)
+    {
+        if (selected.Count == 0) return;
+
+        var module = BannerBrosModule.Instance;
+        if (module == null) return;
+
+        var speedStr = selected[0].Identifier as string;
+        if (speedStr == "2")
+        {
+            module.Config.TimeSpeedMultiplier = 2.0f;
+        }
+        else
+        {
+            module.Config.TimeSpeedMultiplier = 1.0f;
+        }
+
+        // Now show the confirmation dialog
+        var speedText = module.Config.TimeSpeedMultiplier >= 2.0f ? "Fast (2x)" : "Normal (1x)";
+        var inquiry = new InquiryData(
+            "Host Co-op Session",
+            $"Start a new co-op campaign.\n\nGame Speed: {speedText}\nPort: {module.Config.DefaultPort}\n\nOther players will be able to join your game.",
+            true,
+            true,
+            "Start Hosting",
+            "Cancel",
+            OnHostNewCampaign,
+            null
+        );
+
+        InformationManager.ShowInquiry(inquiry, true);
     }
 
     public static void ShowJoinDialog()
