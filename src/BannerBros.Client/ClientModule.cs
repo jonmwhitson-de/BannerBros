@@ -142,19 +142,14 @@ public class ClientModule : MBSubModuleBase
         var module = BannerBrosModule.Instance;
         if (module?.IsConnected != true) return;
 
-        // J - Join nearby battle
-        if (Input.IsKeyPressed(InputKey.J))
-        {
-            TryJoinNearbyBattle();
-        }
+        // Battle joining is handled through the game's normal encounter system
+        // Players approach battles on the map like they would NPC battles
 
-        // P - Show player list
+        // P - Show player list (TODO: may need different key if conflicts)
         if (Input.IsKeyPressed(InputKey.P))
         {
             CoopSessionMenu.ShowPlayerList();
         }
-
-        // Escape menu additions are handled via Harmony patches
     }
 
     private void TryJoinNearbyBattle()
