@@ -125,8 +125,10 @@ public static class EscapeMenuPatches
 {
     /// <summary>
     /// Adds co-op options to the in-game escape menu.
+    /// DISABLED: Method signature varies by Bannerlord version.
+    /// Use keyboard shortcuts instead (P = player list, J = join battle)
     /// </summary>
-    [HarmonyPatch(typeof(EscapeMenuVM), "RefreshItems")]
+    // [HarmonyPatch(typeof(EscapeMenuVM), "RefreshItems")]
     public static class EscapeMenuRefreshPatch
     {
         public static void Postfix(EscapeMenuVM __instance)
