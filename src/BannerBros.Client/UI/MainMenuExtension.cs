@@ -52,6 +52,7 @@ public static class MainMenuExtension
             "Select game speed for your co-op session:\n\n(This controls how fast time passes on the campaign map)",
             new List<InquiryElement>
             {
+                new InquiryElement("0.5", "Slow (0.5x)", null, true, "Half speed - more time to react"),
                 new InquiryElement("1", "Normal (1x)", null, true, "Standard campaign speed"),
                 new InquiryElement("2", "Fast (2x)", null, true, "Double speed campaign"),
             },
@@ -75,9 +76,10 @@ public static class MainMenuExtension
         if (module == null) return;
 
         var speedStr = selected[0].Identifier as string;
-        if (speedStr == "2")
+        if (float.TryParse(speedStr, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var speed))
         {
-            module.Config.TimeSpeedMultiplier = 2.0f;
+            module.Config.TimeSpeedMultiplier = speed;
         }
         else
         {
@@ -85,7 +87,8 @@ public static class MainMenuExtension
         }
 
         // Now show the confirmation dialog
-        var speedText = module.Config.TimeSpeedMultiplier >= 2.0f ? "Fast (2x)" : "Normal (1x)";
+        var speedText = module.Config.TimeSpeedMultiplier <= 0.5f ? "Slow (0.5x)" :
+                        module.Config.TimeSpeedMultiplier >= 2.0f ? "Fast (2x)" : "Normal (1x)";
         var inquiry = new InquiryData(
             "Host Co-op Session",
             $"Start a new co-op campaign.\n\nGame Speed: {speedText}\nPort: {module.Config.DefaultPort}\n\nOther players will be able to join your game.",
