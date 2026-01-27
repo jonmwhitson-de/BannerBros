@@ -1000,6 +1000,18 @@ public class SessionManager
                 party = TryCreatePartyViaHelper(hero, clan, spawnSettlement);
             }
 
+            // Method 4: Try direct party spawning via Actions
+            if (party == null)
+            {
+                party = TrySpawnPartyDirectly(hero, clan, spawnSettlement);
+            }
+
+            // Method 5: Last resort - create minimal party manually
+            if (party == null)
+            {
+                party = TryCreateMinimalParty(hero, clan, spawnSettlement);
+            }
+
             if (party != null)
             {
                 BannerBrosModule.LogMessage($"Party created for {hero.Name} with {party.MemberRoster?.TotalManCount ?? 0} troops");
@@ -1234,6 +1246,178 @@ public class SessionManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"Helper party creation failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    private MobileParty? TrySpawnPartyDirectly(Hero hero, Clan clan, Settlement settlement)
+    {
+        try
+        {
+            BannerBrosModule.LogMessage("Trying direct party spawn...");
+
+            // Try using EnterSettlementAction then LeaveSettlementAction
+            // This can trigger automatic party creation for lords
+            try
+            {
+                EnterSettlementAction.ApplyForCharacterOnly(hero, settlement);
+                BannerBrosModule.LogMessage($"Hero entered settlement {settlement.Name}");
+
+                // Check if party was created
+                if (hero.PartyBelongedTo != null)
+                {
+                    LeaveSettlementAction.ApplyForCharacterOnly(hero);
+                    BannerBrosModule.LogMessage("Party created via settlement entry");
+                    return hero.PartyBelongedTo;
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Settlement entry approach failed: {ex.Message}");
+            }
+
+            // Try using AddCompanionAction approach - make hero a "companion" temporarily
+            // then promote to party leader
+            try
+            {
+                // Look for SpawnLordParty method
+                var assembly = typeof(MobileParty).Assembly;
+                var helperType = assembly.GetType("TaleWorlds.CampaignSystem.Actions.HeroSpawnCampaignBehavior") ??
+                                 assembly.GetType("TaleWorlds.CampaignSystem.CampaignBehaviors.HeroSpawnCampaignBehavior");
+
+                if (helperType != null)
+                {
+                    var spawnMethod = helperType.GetMethod("SpawnLordParty",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance);
+
+                    if (spawnMethod != null)
+                    {
+                        BannerBrosModule.LogMessage($"Found SpawnLordParty in {helperType.Name}");
+                    }
+                }
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Direct spawn failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    private MobileParty? TryCreateMinimalParty(Hero hero, Clan clan, Settlement settlement)
+    {
+        try
+        {
+            BannerBrosModule.LogMessage("Trying minimal party creation...");
+
+            // Create a party ID
+            var partyId = $"coop_party_{hero.StringId}_{DateTime.Now.Ticks}";
+
+            // Try to create party with no component (some versions allow this)
+            try
+            {
+                var createMethod = typeof(MobileParty).GetMethod("CreateParty",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(string), typeof(PartyComponent), typeof(Func<MobileParty, PartyComponent>) },
+                    null);
+
+                if (createMethod != null)
+                {
+                    // Create with a delegate that returns a warband component
+                    Func<MobileParty, PartyComponent> componentDelegate = (party) =>
+                    {
+                        // Try to create a simple component
+                        try
+                        {
+                            var warbandType = typeof(MobileParty).Assembly.GetType(
+                                "TaleWorlds.CampaignSystem.Party.PartyComponents.WarPartyComponent");
+                            if (warbandType != null)
+                            {
+                                var ctor = warbandType.GetConstructors(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)
+                                    .FirstOrDefault();
+                                if (ctor != null)
+                                {
+                                    return ctor.Invoke(new object[] { clan, hero }) as PartyComponent;
+                                }
+                            }
+                        }
+                        catch { }
+                        return null!;
+                    };
+
+                    var party = createMethod.Invoke(null, new object[] { partyId, null!, componentDelegate }) as MobileParty;
+                    if (party != null)
+                    {
+                        // Initialize with hero
+                        party.MemberRoster.AddToCounts(hero.CharacterObject, 1);
+                        party.ActualClan = clan;
+
+                        // Set position
+                        var gatePos = settlement.GatePosition;
+                        try
+                        {
+                            var setPosProp = party.GetType().GetProperty("Position2D");
+                            setPosProp?.SetValue(party, new Vec2(gatePos.X, gatePos.Y));
+                        }
+                        catch { }
+
+                        BannerBrosModule.LogMessage("Created minimal party");
+                        return party;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Minimal party via CreateParty failed: {ex.Message}");
+            }
+
+            // Last attempt: Use the simplest CreateParty overload
+            try
+            {
+                var simpleCreateMethod = typeof(MobileParty).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .Where(m => m.Name == "CreateParty")
+                    .OrderBy(m => m.GetParameters().Length)
+                    .FirstOrDefault();
+
+                if (simpleCreateMethod != null)
+                {
+                    var parms = simpleCreateMethod.GetParameters();
+                    BannerBrosModule.LogMessage($"Found CreateParty with {parms.Length} params: {string.Join(", ", parms.Select(p => p.ParameterType.Name))}");
+
+                    // Try to invoke with appropriate args
+                    object?[] args = new object?[parms.Length];
+                    for (int i = 0; i < parms.Length; i++)
+                    {
+                        if (parms[i].ParameterType == typeof(string))
+                            args[i] = partyId;
+                        else if (parms[i].ParameterType.IsSubclassOf(typeof(PartyComponent)) || parms[i].ParameterType == typeof(PartyComponent))
+                            args[i] = null;
+                        else if (parms[i].ParameterType.IsGenericType)
+                            args[i] = null;
+                        else
+                            args[i] = null;
+                    }
+
+                    var party = simpleCreateMethod.Invoke(null, args) as MobileParty;
+                    if (party != null)
+                    {
+                        party.MemberRoster.AddToCounts(hero.CharacterObject, 1);
+                        party.ActualClan = clan;
+                        BannerBrosModule.LogMessage("Created party via simple CreateParty");
+                        return party;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Simple CreateParty failed: {ex.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Minimal party creation failed: {ex.Message}");
         }
         return null;
     }
