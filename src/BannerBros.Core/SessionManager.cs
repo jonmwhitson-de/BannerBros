@@ -478,7 +478,7 @@ public class SessionManager
         var type = typeof(LordPartyComponent);
 
         // Try various constructor signatures that exist across Bannerlord versions
-        object?[] constructorArgs = new object?[][]
+        object?[][] constructorArgs = new object?[][]
         {
             new object?[] { hero, clan },                    // (Hero, Clan)
             new object?[] { hero, settlement },              // (Hero, Settlement)
