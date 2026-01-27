@@ -135,9 +135,17 @@ public class NetworkManager : INetEventListener
         var writer = new NetDataWriter();
         _packetProcessor.Write(writer, packet);
 
-        foreach (var peer in _peers.Values)
+        // ToList() to avoid collection modified exception if peer connects/disconnects
+        foreach (var peer in _peers.Values.ToList())
         {
-            peer.Send(writer, deliveryMethod);
+            try
+            {
+                peer.Send(writer, deliveryMethod);
+            }
+            catch
+            {
+                // Ignore send errors for individual peers
+            }
         }
     }
 
@@ -157,11 +165,19 @@ public class NetworkManager : INetEventListener
         var writer = new NetDataWriter();
         _packetProcessor.Write(writer, packet);
 
-        foreach (var kvp in _peers)
+        // ToList() to avoid collection modified exception
+        foreach (var kvp in _peers.ToList())
         {
             if (kvp.Key != excludePeerId)
             {
-                kvp.Value.Send(writer, deliveryMethod);
+                try
+                {
+                    kvp.Value.Send(writer, deliveryMethod);
+                }
+                catch
+                {
+                    // Ignore send errors for individual peers
+                }
             }
         }
     }

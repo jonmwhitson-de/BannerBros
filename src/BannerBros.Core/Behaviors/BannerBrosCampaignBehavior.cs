@@ -326,18 +326,25 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             // Update server time
             module.WorldStateManager.UpdateServerTime(CampaignTime.Now);
 
-            // Build battle info list
+            // Build battle info list - ToList() to avoid collection modification
             var battles = new List<BattleInfo>();
-            foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
+            foreach (var battle in module.WorldStateManager.ActiveBattles.Values.ToList())
             {
-                battles.Add(new BattleInfo
+                try
                 {
-                    BattleId = battle.BattleId,
-                    MapPosition = battle.MapPosition,
-                    InitiatorPlayerId = battle.InitiatorPlayerId,
-                    AttackerPlayerIdsJson = JsonConvert.SerializeObject(battle.GetPlayersOnSide(BattleSide.Attacker).ToList()),
-                    DefenderPlayerIdsJson = JsonConvert.SerializeObject(battle.GetPlayersOnSide(BattleSide.Defender).ToList())
-                });
+                    battles.Add(new BattleInfo
+                    {
+                        BattleId = battle.BattleId,
+                        MapPosition = battle.MapPosition,
+                        InitiatorPlayerId = battle.InitiatorPlayerId,
+                        AttackerPlayerIdsJson = JsonConvert.SerializeObject(battle.GetPlayersOnSide(BattleSide.Attacker).ToList()),
+                        DefenderPlayerIdsJson = JsonConvert.SerializeObject(battle.GetPlayersOnSide(BattleSide.Defender).ToList())
+                    });
+                }
+                catch
+                {
+                    // Skip battle if there's an error
+                }
             }
 
             // Send lightweight world sync
@@ -395,45 +402,68 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 }
             }
 
-            // Build active battles
+            // Build active battles - ToList() to avoid collection modification
             var activeBattles = new List<BattleInfo>();
-            foreach (var battle in module.WorldStateManager.ActiveBattles.Values)
+            foreach (var battle in module.WorldStateManager.ActiveBattles.Values.ToList())
             {
-                activeBattles.Add(new BattleInfo
+                try
                 {
-                    BattleId = battle.BattleId,
-                    MapPosition = battle.MapPosition,
-                    InitiatorPlayerId = battle.InitiatorPlayerId
-                });
+                    activeBattles.Add(new BattleInfo
+                    {
+                        BattleId = battle.BattleId,
+                        MapPosition = battle.MapPosition,
+                        InitiatorPlayerId = battle.InitiatorPlayerId
+                    });
+                }
+                catch
+                {
+                    // Skip battle if there's an error
+                }
             }
 
-            // Build diplomacy states (wars, alliances)
+            // Build diplomacy states (wars, alliances) - wrapped in try/catch for safety
             var diplomacyStates = new List<DiplomacyState>();
-            if (Campaign.Current?.Kingdoms != null)
+            try
             {
-                foreach (var kingdom1 in Campaign.Current.Kingdoms)
+                if (Campaign.Current?.Kingdoms != null)
                 {
-                    foreach (var kingdom2 in Campaign.Current.Kingdoms)
+                    // ToList() to avoid collection modification during iteration
+                    var kingdoms = Campaign.Current.Kingdoms.ToList();
+                    foreach (var kingdom1 in kingdoms)
                     {
-                        if (kingdom1.StringId.CompareTo(kingdom2.StringId) < 0) // Avoid duplicates
+                        foreach (var kingdom2 in kingdoms)
                         {
-                            var stance = kingdom1.GetStanceWith(kingdom2);
-                            // Check war status and alliance based on available API
-                            var isAtWar = stance.IsAtWar;
-                            // Alliance check - use IsNeutral as inverse indicator if IsAllied not available
-                            var isAllied = !stance.IsAtWar && !stance.IsNeutral;
-                            if (isAtWar || isAllied)
+                            try
                             {
-                                diplomacyStates.Add(new DiplomacyState
+                                if (kingdom1.StringId.CompareTo(kingdom2.StringId) < 0) // Avoid duplicates
                                 {
-                                    Faction1Id = kingdom1.StringId,
-                                    Faction2Id = kingdom2.StringId,
-                                    RelationType = isAtWar ? 1 : (isAllied ? 2 : 0)
-                                });
+                                    var stance = kingdom1.GetStanceWith(kingdom2);
+                                    // Check war status and alliance based on available API
+                                    var isAtWar = stance.IsAtWar;
+                                    // Alliance check - use IsNeutral as inverse indicator if IsAllied not available
+                                    var isAllied = !stance.IsAtWar && !stance.IsNeutral;
+                                    if (isAtWar || isAllied)
+                                    {
+                                        diplomacyStates.Add(new DiplomacyState
+                                        {
+                                            Faction1Id = kingdom1.StringId,
+                                            Faction2Id = kingdom2.StringId,
+                                            RelationType = isAtWar ? 1 : (isAllied ? 2 : 0)
+                                        });
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // Skip this kingdom pair if there's an error
                             }
                         }
                     }
                 }
+            }
+            catch (Exception dipEx)
+            {
+                BannerBrosModule.LogMessage($"Warning: Diplomacy sync error: {dipEx.Message}");
             }
 
             var packet = new FullStateSyncPacket
