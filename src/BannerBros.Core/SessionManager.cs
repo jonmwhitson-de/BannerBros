@@ -44,6 +44,9 @@ public class SessionManager
 
     public void Initialize()
     {
+        // Always cleanup first to prevent duplicate subscriptions
+        Cleanup();
+
         var networkManager = NetworkManager.Instance;
         if (networkManager == null) return;
 
