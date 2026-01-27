@@ -315,6 +315,8 @@ public static class CoopConnectionManager
     /// </summary>
     public static PendingCoopConnection? PendingConnection { get; set; }
 
+    private static bool _hasLoggedPending = false;
+
     /// <summary>
     /// Checks if there's a pending connection and processes it.
     /// Call this when the main menu is shown.
@@ -323,23 +325,44 @@ public static class CoopConnectionManager
     {
         if (PendingConnection == null)
         {
+            _hasLoggedPending = false;
+            return;
+        }
+
+        // Only log once to avoid spam
+        if (!_hasLoggedPending)
+        {
+            BannerBrosModule.LogMessage($"Pending co-op connection found: {PendingConnection.ServerAddress}:{PendingConnection.ServerPort}");
+            BannerBrosModule.LogMessage("Will auto-connect when ready...");
+            _hasLoggedPending = true;
+        }
+
+        // Make sure we're not already connected and not in a campaign
+        var module = BannerBrosModule.Instance;
+        if (module == null || module.IsConnected)
+        {
             return;
         }
 
         var pending = PendingConnection;
         PendingConnection = null;
+        _hasLoggedPending = false;
 
-        BannerBrosModule.LogMessage($"Processing pending connection to {pending.ServerAddress}:{pending.ServerPort}");
+        BannerBrosModule.LogMessage($"Auto-connecting to {pending.ServerAddress}:{pending.ServerPort}...");
 
         // Auto-join the server with the captured character
-        var module = BannerBrosModule.Instance;
-        if (module != null && pending.CharacterData != null)
+        if (pending.CharacterData != null)
         {
             // Store the character for the join flow
             module.PendingExportedCharacter = pending.CharacterData;
+            BannerBrosModule.LogMessage($"Using character: {pending.CharacterData.Name}");
 
             // Connect to server
             module.JoinSession(pending.ServerAddress, pending.ServerPort);
+        }
+        else
+        {
+            BannerBrosModule.LogMessage("Error: No character data in pending connection");
         }
     }
 }

@@ -85,6 +85,13 @@ public class BannerBrosModule : MBSubModuleBase
         {
             EnforceTimeControl();
         }
+
+        // Check for pending co-op connections when on main menu
+        // This handles the case where player returns to menu after character creation
+        if (!IsConnected && Campaign.Current == null)
+        {
+            Patches.CoopConnectionManager.CheckAndProcessPendingConnection();
+        }
     }
 
     private void EnforceTimeControl()
@@ -161,6 +168,9 @@ public class BannerBrosModule : MBSubModuleBase
         base.OnBeforeInitialModuleScreenSetAsRoot();
         // Notify other modules that core is ready
         OnCoreModuleReady?.Invoke();
+
+        // Check for pending co-op connections (after character creation)
+        Patches.CoopConnectionManager.CheckAndProcessPendingConnection();
     }
 
     /// <summary>
