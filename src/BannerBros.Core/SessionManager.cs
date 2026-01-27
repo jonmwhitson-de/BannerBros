@@ -492,19 +492,27 @@ public class SessionManager
     {
         var infos = new List<ConnectedPlayerInfo>();
 
-        foreach (var player in _playerManager.Players.Values)
+        // ToList() to avoid collection modified exception
+        foreach (var player in _playerManager.Players.Values.ToList())
         {
-            infos.Add(new ConnectedPlayerInfo
+            try
             {
-                NetworkId = player.NetworkId,
-                Name = player.Name,
-                HeroId = player.HeroId,
-                ClanId = player.ClanId,
-                KingdomId = player.KingdomId,
-                MapX = player.MapPositionX,
-                MapY = player.MapPositionY,
-                IsHost = player.IsHost
-            });
+                infos.Add(new ConnectedPlayerInfo
+                {
+                    NetworkId = player.NetworkId,
+                    Name = player.Name ?? "Unknown",
+                    HeroId = player.HeroId,
+                    ClanId = player.ClanId,
+                    KingdomId = player.KingdomId,
+                    MapX = player.MapPositionX,
+                    MapY = player.MapPositionY,
+                    IsHost = player.IsHost
+                });
+            }
+            catch
+            {
+                // Skip player if there's an error
+            }
         }
 
         return infos;
@@ -515,20 +523,36 @@ public class SessionManager
         try
         {
             var playerStates = new List<PlayerStatePacket>();
-            foreach (var player in _playerManager.Players.Values)
+            // ToList() to avoid collection modified exception
+            foreach (var player in _playerManager.Players.Values.ToList())
             {
-                playerStates.Add(CreatePlayerStatePacket(player));
+                try
+                {
+                    playerStates.Add(CreatePlayerStatePacket(player));
+                }
+                catch
+                {
+                    // Skip player if there's an error creating packet
+                }
             }
 
             var activeBattles = new List<BattleInfo>();
-            foreach (var battle in _worldStateManager.ActiveBattles.Values)
+            // ToList() to avoid collection modified exception
+            foreach (var battle in _worldStateManager.ActiveBattles.Values.ToList())
             {
-                activeBattles.Add(new BattleInfo
+                try
                 {
-                    BattleId = battle.BattleId,
-                    MapPosition = battle.MapPosition,
-                    InitiatorPlayerId = battle.InitiatorPlayerId
-                });
+                    activeBattles.Add(new BattleInfo
+                    {
+                        BattleId = battle.BattleId,
+                        MapPosition = battle.MapPosition,
+                        InitiatorPlayerId = battle.InitiatorPlayerId
+                    });
+                }
+                catch
+                {
+                    // Skip battle if there's an error
+                }
             }
 
             // Safely get campaign time - may not exist if joining before campaign starts

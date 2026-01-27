@@ -368,24 +368,31 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
             if (module?.IsHost != true || networkManager == null) return;
 
-            // Build player states
+            // Build player states - with null protection
             var playerStates = new List<PlayerStatePacket>();
-            foreach (var player in module.PlayerManager.Players.Values)
+            foreach (var player in module.PlayerManager.Players.Values.ToList()) // ToList() to avoid collection modification
             {
-                playerStates.Add(new PlayerStatePacket
+                try
                 {
-                    PlayerId = player.NetworkId,
-                    PlayerName = player.Name,
-                    MapX = player.MapPositionX,
-                    MapY = player.MapPositionY,
-                    State = (int)player.State,
-                    HeroId = player.HeroId ?? "",
-                    PartyId = player.PartyId ?? "",
-                    ClanId = player.ClanId ?? "",
-                    KingdomId = player.KingdomId ?? "",
-                    IsInBattle = player.CurrentBattleId != null,
-                    BattleId = player.CurrentBattleId ?? ""
-                });
+                    playerStates.Add(new PlayerStatePacket
+                    {
+                        PlayerId = player.NetworkId,
+                        PlayerName = player.Name ?? "Unknown",
+                        MapX = player.MapPositionX,
+                        MapY = player.MapPositionY,
+                        State = (int)player.State,
+                        HeroId = player.HeroId ?? "",
+                        PartyId = player.PartyId ?? "",
+                        ClanId = player.ClanId ?? "",
+                        KingdomId = player.KingdomId ?? "",
+                        IsInBattle = player.CurrentBattleId != null,
+                        BattleId = player.CurrentBattleId ?? ""
+                    });
+                }
+                catch (Exception playerEx)
+                {
+                    BannerBrosModule.LogMessage($"Warning: Failed to create state packet for player {player?.Name}: {playerEx.Message}");
+                }
             }
 
             // Build active battles

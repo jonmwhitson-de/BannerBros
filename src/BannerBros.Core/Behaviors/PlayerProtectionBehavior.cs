@@ -38,12 +38,27 @@ public class PlayerProtectionBehavior : CampaignBehaviorBase
 
         _protectedPlayers.Clear();
 
-        foreach (var player in module.PlayerManager.Players.Values)
+        try
         {
-            if (ShouldBeProtected(player))
+            // ToList() to avoid collection modified exception when players join/leave
+            foreach (var player in module.PlayerManager.Players.Values.ToList())
             {
-                _protectedPlayers.Add(player.NetworkId);
+                try
+                {
+                    if (ShouldBeProtected(player))
+                    {
+                        _protectedPlayers.Add(player.NetworkId);
+                    }
+                }
+                catch
+                {
+                    // Skip this player if there's an error
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"UpdateProtectionStates error: {ex.Message}");
         }
     }
 
