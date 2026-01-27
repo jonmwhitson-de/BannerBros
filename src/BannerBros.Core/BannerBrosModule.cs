@@ -229,9 +229,17 @@ public class BannerBrosModule : MBSubModuleBase
 
     public void JoinSession(string address, int port = 7777)
     {
+        if (NetworkManager.Instance == null)
+        {
+            LogMessage("Error: NetworkManager not initialized!");
+            return;
+        }
+
         IsHost = false;
+        LogMessage("JoinSession: Initializing SessionManager...");
         SessionManager.Initialize();
-        NetworkManager.Instance?.Connect(address, port);
+        LogMessage("JoinSession: Connecting to server...");
+        NetworkManager.Instance.Connect(address, port);
         IsConnected = true;
         LogMessage($"Joining session at {address}:{port}");
     }

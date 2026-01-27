@@ -192,6 +192,7 @@ public class SessionManager
             };
 
             // Send response
+            BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}");
             networkManager.SendTo(peerId, response);
 
             // Create player entry (not fully initialized until character is created/loaded)

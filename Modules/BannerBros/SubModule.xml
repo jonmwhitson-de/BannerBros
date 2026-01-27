@@ -13,19 +13,20 @@
         <DependedModule Id="StoryMode"/>
     </DependedModules>
     <SubModules>
+        <!-- Network must load before Core so NetworkManager.Instance is available -->
         <SubModule>
-            <Name value="BannerBros.Core"/>
-            <DLLName value="BannerBros.Core.dll"/>
-            <SubModuleClassType value="BannerBros.Core.BannerBrosModule"/>
+            <Name value="BannerBros.Network"/>
+            <DLLName value="BannerBros.Network.dll"/>
+            <SubModuleClassType value="BannerBros.Network.NetworkModule"/>
             <Tags>
                 <Tag key="DedicatedServerType" value="none"/>
                 <Tag key="IsNoRenderModeElement" value="false"/>
             </Tags>
         </SubModule>
         <SubModule>
-            <Name value="BannerBros.Network"/>
-            <DLLName value="BannerBros.Network.dll"/>
-            <SubModuleClassType value="BannerBros.Network.NetworkModule"/>
+            <Name value="BannerBros.Core"/>
+            <DLLName value="BannerBros.Core.dll"/>
+            <SubModuleClassType value="BannerBros.Core.BannerBrosModule"/>
             <Tags>
                 <Tag key="DedicatedServerType" value="none"/>
                 <Tag key="IsNoRenderModeElement" value="false"/>
