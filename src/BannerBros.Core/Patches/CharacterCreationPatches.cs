@@ -59,8 +59,10 @@ public static class CharacterCreationPatches
         PendingServerPort = serverPort;
         CapturedCharacter = null;
 
-        BannerBrosModule.LogMessage("Starting character creation for co-op...");
-        BannerBrosModule.LogMessage("After creation, you'll automatically join the server.");
+        BannerBrosModule.LogMessage("=== CO-OP CHARACTER CREATION MODE ENABLED ===");
+        BannerBrosModule.LogMessage($"Server: {serverAddress}:{serverPort}");
+        BannerBrosModule.LogMessage("Go to Campaign > New Campaign to create your character.");
+        BannerBrosModule.LogMessage("Your character will be captured when the map loads.");
 
         // Start a new campaign - this triggers character creation
         // The game handles showing the character creation screens
@@ -256,6 +258,9 @@ public static class MapStateActivatePatch
 {
     static void Postfix(MapState __instance)
     {
+        // Always log to confirm patch is working
+        BannerBrosModule.LogMessage($"[DEBUG] MapState.OnActivate fired. IsCreatingForCoopExport={CharacterCreationPatches.IsCreatingForCoopExport}");
+
         if (!CharacterCreationPatches.IsCreatingForCoopExport)
         {
             return;
@@ -265,7 +270,7 @@ public static class MapStateActivatePatch
         // Capture and exit
         try
         {
-            BannerBrosModule.LogMessage("Map loaded during co-op character creation - capturing...");
+            BannerBrosModule.LogMessage("=== CAPTURING CHARACTER FOR CO-OP ===");
 
             if (Hero.MainHero != null)
             {

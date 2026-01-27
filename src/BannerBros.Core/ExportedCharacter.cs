@@ -279,12 +279,17 @@ public class ExportedCharacter
             "BannerBros_Characters"
         );
 
+        BannerBrosModule.LogMessage($"[DEBUG] Looking for characters in: {directory}");
+
         if (!Directory.Exists(directory))
         {
+            BannerBrosModule.LogMessage("[DEBUG] Character directory does not exist");
             return new List<string>();
         }
 
-        return Directory.GetFiles(directory, "*.json").ToList();
+        var files = Directory.GetFiles(directory, "*.json").ToList();
+        BannerBrosModule.LogMessage($"[DEBUG] Found {files.Count} character files");
+        return files;
     }
 
     /// <summary>
