@@ -1,3 +1,4 @@
+using System.Reflection;
 using Newtonsoft.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
@@ -424,38 +425,40 @@ public class SessionManager
             }
 
             // Get spawn position
-            var spawnPos = spawnSettlement.GatePosition;
-            var position = new Vec2(spawnPos.X, spawnPos.Y);
+            var position = spawnSettlement.GatePosition;
 
-            // Create a troop roster for the party
-            var memberRoster = TroopRoster.CreateDummyTroopRoster();
-            memberRoster.AddToCounts(hero.CharacterObject, 1); // Add hero
+            // Create party component using reflection (API varies by version)
+            var partyId = $"coop_party_{hero.StringId}";
+            PartyComponent? component = CreateLordPartyComponentReflection(hero, clan, spawnSettlement);
 
-            // Add some starting troops
-            if (clan.BasicTroop != null)
+            if (component == null)
             {
-                memberRoster.AddToCounts(clan.BasicTroop, 5);
+                BannerBrosModule.LogMessage("Failed to create party component");
+                return null;
             }
-            if (clan.Culture?.EliteBasicTroop != null)
-            {
-                memberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
-            }
-
-            var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
-
-            // Create the party component
-            var partyComponent = new LordPartyComponent(hero);
 
             // Create the party
-            var partyId = $"coop_party_{hero.StringId}";
-            var party = MobileParty.CreateParty(partyId, partyComponent);
+            var party = MobileParty.CreateParty(partyId, component);
 
             if (party != null)
             {
-                // Initialize at position with rosters
-                party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, position);
+                // Create troop rosters
+                var memberRoster = TroopRoster.CreateDummyTroopRoster();
+                memberRoster.AddToCounts(hero.CharacterObject, 1);
 
-                // Set clan
+                if (clan.BasicTroop != null)
+                {
+                    memberRoster.AddToCounts(clan.BasicTroop, 5);
+                }
+                if (clan.Culture?.EliteBasicTroop != null)
+                {
+                    memberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
+                }
+
+                var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
+
+                // Initialize at position
+                party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, position);
                 party.ActualClan = clan;
 
                 BannerBrosModule.LogMessage($"Party {partyId} created with {party.MemberRoster.TotalManCount} troops");
@@ -466,17 +469,62 @@ public class SessionManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"CreatePlayerParty error: {ex.Message}");
+            return hero.PartyBelongedTo;
+        }
+    }
 
-            // Return existing party if any
+    private PartyComponent? CreateLordPartyComponentReflection(Hero hero, Clan clan, Settlement settlement)
+    {
+        var type = typeof(LordPartyComponent);
+
+        // Try various constructor signatures that exist across Bannerlord versions
+        object?[] constructorArgs = new object?[][]
+        {
+            new object?[] { hero, clan },                    // (Hero, Clan)
+            new object?[] { hero, settlement },              // (Hero, Settlement)
+            new object?[] { hero, hero, clan },              // (Hero, Hero, Clan)
+            new object?[] { hero, clan, settlement },        // (Hero, Clan, Settlement)
+            new object?[] { hero },                          // (Hero)
+        };
+
+        foreach (var args in constructorArgs)
+        {
             try
             {
-                return hero.PartyBelongedTo;
+                var argTypes = args.Select(a => a?.GetType()).ToArray();
+                var ctor = type.GetConstructors()
+                    .FirstOrDefault(c =>
+                    {
+                        var parameters = c.GetParameters();
+                        if (parameters.Length != args.Length) return false;
+
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            if (args[i] == null) continue;
+                            if (!parameters[i].ParameterType.IsAssignableFrom(args[i]!.GetType()))
+                                return false;
+                        }
+                        return true;
+                    });
+
+                if (ctor != null)
+                {
+                    var result = ctor.Invoke(args) as PartyComponent;
+                    if (result != null)
+                    {
+                        BannerBrosModule.LogMessage($"Created LordPartyComponent with {args.Length} args");
+                        return result;
+                    }
+                }
             }
             catch
             {
-                return null;
+                // Try next constructor
             }
         }
+
+        BannerBrosModule.LogMessage("Could not find valid LordPartyComponent constructor");
+        return null;
     }
 
     private Clan? CreatePlayerClan(CultureObject culture, string playerName)
