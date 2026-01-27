@@ -155,6 +155,10 @@ public class SessionManager
         }
     }
 
+    // Queue for pending join requests when host is busy
+    private readonly Queue<(JoinRequestPacket packet, int peerId)> _pendingJoinRequests = new();
+    private bool _processingJoinRequest = false;
+
     private void HandleJoinRequest(JoinRequestPacket packet, int peerId)
     {
         var networkManager = NetworkManager.Instance;
@@ -162,133 +166,227 @@ public class SessionManager
 
         try
         {
-            BannerBrosModule.LogMessage($"Processing join request from {packet.PlayerName}");
-
-            // Validate version
-            if (packet.ModVersion != ModVersion)
+            // Check if host is in a state that can process joins
+            if (!CanProcessJoinRequest())
             {
-                SendJoinResponse(peerId, false, $"Version mismatch. Host: {ModVersion}, Client: {packet.ModVersion}");
+                BannerBrosModule.LogMessage($"Host busy - queuing join request from {packet.PlayerName}");
+                _pendingJoinRequests.Enqueue((packet, peerId));
                 return;
             }
 
-            // Check player limit
-            if (_playerManager.PlayerCount >= (BannerBrosModule.Instance?.Config.MaxPlayers ?? 4))
+            // Prevent concurrent join processing
+            if (_processingJoinRequest)
             {
-                SendJoinResponse(peerId, false, "Server is full");
+                BannerBrosModule.LogMessage($"Already processing a join - queuing request from {packet.PlayerName}");
+                _pendingJoinRequests.Enqueue((packet, peerId));
                 return;
             }
 
-            // Assign player ID
-            var playerId = _nextPlayerId++;
-
-            // Check if client sent exported character data (from full character creation)
-            ExportedCharacter? exportedCharacter = null;
-            if (!string.IsNullOrEmpty(packet.ExportedCharacterJson))
-            {
-                exportedCharacter = ExportedCharacter.FromJson(packet.ExportedCharacterJson);
-                if (exportedCharacter != null)
-                {
-                    BannerBrosModule.LogMessage($"Received exported character: {exportedCharacter.Name}");
-                }
-            }
-
-            // Check if this player has a saved character they can reclaim
-            var savedCharacter = BannerBrosModule.Instance?.PlayerSaveData.FindCharacter(packet.PlayerName);
-            bool hasValidSavedCharacter = savedCharacter != null && PlayerSaveData.IsHeroValid(savedCharacter.HeroId);
-
-            // Player needs character creation if:
-            // - No valid saved character AND no exported character AND hasn't indicated existing
-            bool requiresCharacterCreation = !hasValidSavedCharacter && exportedCharacter == null && !packet.HasExistingCharacter;
-
-            // Build response with current world state
-            var response = new JoinResponsePacket
-            {
-                Accepted = true,
-                AssignedPlayerId = playerId,
-                RequiresCharacterCreation = requiresCharacterCreation,
-                ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
-            };
-
-            // If player has a saved character, include that info
-            if (hasValidSavedCharacter && savedCharacter != null)
-            {
-                response.WorldStateData = JsonConvert.SerializeObject(new SavedCharacterInfo
-                {
-                    HeroId = savedCharacter.HeroId,
-                    ClanId = savedCharacter.ClanId,
-                    PartyId = savedCharacter.PartyId,
-                    HeroName = GetHeroName(savedCharacter.HeroId)
-                });
-                BannerBrosModule.LogMessage($"Player {packet.PlayerName} has saved character: {savedCharacter.HeroId}");
-            }
-
-            // Send response first
-            BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}");
-            networkManager.SendTo(peerId, response);
-
-            // Create player entry
-            var player = new CoopPlayer
-            {
-                NetworkId = playerId,
-                Name = packet.PlayerName,
-                IsHost = false,
-                State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
-            };
-
-            // Handle the different cases:
-            if (exportedCharacter != null)
-            {
-                // Client sent full character data - create hero from it
-                BannerBrosModule.LogMessage($"Creating hero from exported character data...");
-                var result = SpawnHeroFromExportedCharacter(exportedCharacter, player);
-
-                if (result.Success)
-                {
-                    player.HeroId = result.HeroId;
-                    player.ClanId = result.ClanId;
-                    player.PartyId = result.PartyId;
-                    player.MapPositionX = result.SpawnX;
-                    player.MapPositionY = result.SpawnY;
-                    player.State = PlayerState.OnMap;
-
-                    // Register for future reconnection
-                    BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
-                        player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
-
-                    // Send success response
-                    SendCharacterCreationResponse(peerId, playerId, true, null,
-                        result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
-                }
-                else
-                {
-                    BannerBrosModule.LogMessage($"Failed to create hero: {result.ErrorMessage}");
-                    // Fall back to requiring character creation
-                    player.State = PlayerState.InMenu;
-                }
-            }
-            else if (hasValidSavedCharacter && savedCharacter != null)
-            {
-                // Reclaiming saved character
-                player.HeroId = savedCharacter.HeroId;
-                player.ClanId = savedCharacter.ClanId;
-                player.PartyId = savedCharacter.PartyId;
-                player.State = PlayerState.OnMap;
-                UpdatePlayerPositionFromHero(player);
-            }
-
-            _playerManager.AddPlayer(player);
-
-            // Notify other players
-            BroadcastPlayerJoined(player);
-
-            // Send full state sync
-            SendFullStateSync(peerId);
+            _processingJoinRequest = true;
+            ProcessJoinRequestInternal(packet, peerId);
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"HandleJoinRequest error: {ex.Message}");
-            SendJoinResponse(peerId, false, "Server error processing join request");
+            SendJoinResponse(peerId, false, "Server error - please try again");
         }
+        finally
+        {
+            _processingJoinRequest = false;
+        }
+    }
+
+    private bool CanProcessJoinRequest()
+    {
+        try
+        {
+            // Check if campaign exists
+            if (Campaign.Current == null)
+            {
+                return false;
+            }
+
+            // Check if host's main hero is in a blocking state
+            var mainHero = Hero.MainHero;
+            if (mainHero != null)
+            {
+                // Check for dialogue
+                if (Campaign.Current.ConversationManager?.IsConversationInProgress == true)
+                {
+                    return false;
+                }
+
+                // Check for active mission (battle, scene, etc.)
+                if (TaleWorlds.MountAndBlade.Mission.Current != null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch
+        {
+            // If we can't determine state, assume it's safe
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Process any queued join requests. Call this periodically or when host becomes available.
+    /// </summary>
+    public void ProcessPendingJoinRequests()
+    {
+        if (_pendingJoinRequests.Count == 0 || _processingJoinRequest) return;
+
+        if (!CanProcessJoinRequest()) return;
+
+        while (_pendingJoinRequests.Count > 0 && CanProcessJoinRequest())
+        {
+            var (packet, peerId) = _pendingJoinRequests.Dequeue();
+            BannerBrosModule.LogMessage($"Processing queued join request from {packet.PlayerName}");
+
+            try
+            {
+                _processingJoinRequest = true;
+                ProcessJoinRequestInternal(packet, peerId);
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Error processing queued join: {ex.Message}");
+                SendJoinResponse(peerId, false, "Server error - please try again");
+            }
+            finally
+            {
+                _processingJoinRequest = false;
+            }
+        }
+    }
+
+    private void ProcessJoinRequestInternal(JoinRequestPacket packet, int peerId)
+    {
+        BannerBrosModule.LogMessage($"Processing join request from {packet.PlayerName}");
+
+        // Validate version
+        if (packet.ModVersion != ModVersion)
+        {
+            SendJoinResponse(peerId, false, $"Version mismatch. Host: {ModVersion}, Client: {packet.ModVersion}");
+            return;
+        }
+
+        // Check player limit
+        if (_playerManager.PlayerCount >= (BannerBrosModule.Instance?.Config.MaxPlayers ?? 4))
+        {
+            SendJoinResponse(peerId, false, "Server is full");
+            return;
+        }
+
+        // Assign player ID
+        var playerId = _nextPlayerId++;
+
+        // Check if client sent exported character data (from full character creation)
+        ExportedCharacter? exportedCharacter = null;
+        if (!string.IsNullOrEmpty(packet.ExportedCharacterJson))
+        {
+            exportedCharacter = ExportedCharacter.FromJson(packet.ExportedCharacterJson);
+            if (exportedCharacter != null)
+            {
+                BannerBrosModule.LogMessage($"Received exported character: {exportedCharacter.Name}");
+            }
+        }
+
+        // Check if this player has a saved character they can reclaim
+        var savedCharacter = BannerBrosModule.Instance?.PlayerSaveData.FindCharacter(packet.PlayerName);
+        bool hasValidSavedCharacter = savedCharacter != null && PlayerSaveData.IsHeroValid(savedCharacter.HeroId);
+
+        // Player needs character creation if:
+        // - No valid saved character AND no exported character AND hasn't indicated existing
+        bool requiresCharacterCreation = !hasValidSavedCharacter && exportedCharacter == null && !packet.HasExistingCharacter;
+
+        // Build response with current world state
+        var networkManager = NetworkManager.Instance;
+        var response = new JoinResponsePacket
+        {
+            Accepted = true,
+            AssignedPlayerId = playerId,
+            RequiresCharacterCreation = requiresCharacterCreation,
+            ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
+        };
+
+        // If player has a saved character, include that info
+        if (hasValidSavedCharacter && savedCharacter != null)
+        {
+            response.WorldStateData = JsonConvert.SerializeObject(new SavedCharacterInfo
+            {
+                HeroId = savedCharacter.HeroId,
+                ClanId = savedCharacter.ClanId,
+                PartyId = savedCharacter.PartyId,
+                HeroName = GetHeroName(savedCharacter.HeroId)
+            });
+            BannerBrosModule.LogMessage($"Player {packet.PlayerName} has saved character: {savedCharacter.HeroId}");
+        }
+
+        // Send response first
+        BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}");
+        networkManager?.SendTo(peerId, response);
+
+        // Create player entry
+        var player = new CoopPlayer
+        {
+            NetworkId = playerId,
+            Name = packet.PlayerName,
+            IsHost = false,
+            State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
+        };
+
+        // Handle the different cases:
+        if (exportedCharacter != null)
+        {
+            // Client sent full character data - create hero from it
+            BannerBrosModule.LogMessage($"Creating hero from exported character data...");
+            var result = SpawnHeroFromExportedCharacter(exportedCharacter, player);
+
+            if (result.Success)
+            {
+                player.HeroId = result.HeroId;
+                player.ClanId = result.ClanId;
+                player.PartyId = result.PartyId;
+                player.MapPositionX = result.SpawnX;
+                player.MapPositionY = result.SpawnY;
+                player.State = PlayerState.OnMap;
+
+                // Register for future reconnection
+                BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
+                    player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
+
+                // Send success response
+                SendCharacterCreationResponse(peerId, playerId, true, null,
+                    result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+            }
+            else
+            {
+                BannerBrosModule.LogMessage($"Failed to create hero: {result.ErrorMessage}");
+                // Fall back to requiring character creation
+                player.State = PlayerState.InMenu;
+            }
+        }
+        else if (hasValidSavedCharacter && savedCharacter != null)
+        {
+            // Reclaiming saved character
+            player.HeroId = savedCharacter.HeroId;
+            player.ClanId = savedCharacter.ClanId;
+            player.PartyId = savedCharacter.PartyId;
+            player.State = PlayerState.OnMap;
+            UpdatePlayerPositionFromHero(player);
+        }
+
+        _playerManager.AddPlayer(player);
+
+        // Notify other players
+        BroadcastPlayerJoined(player);
+
+        // Send full state sync
+        SendFullStateSync(peerId);
     }
 
     private string GetHeroName(string heroId)

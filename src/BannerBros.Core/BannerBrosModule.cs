@@ -92,6 +92,12 @@ public class BannerBrosModule : MBSubModuleBase
         {
             Patches.CoopConnectionManager.CheckAndProcessPendingConnection();
         }
+
+        // Process any queued join requests (host only)
+        if (IsHost && IsConnected)
+        {
+            SessionManager?.ProcessPendingJoinRequests();
+        }
     }
 
     private void EnforceTimeControl()
