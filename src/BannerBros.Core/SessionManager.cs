@@ -3,6 +3,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
@@ -418,53 +419,46 @@ public class SessionManager
             // Check if hero already has a party
             if (hero.PartyBelongedTo != null)
             {
+                BannerBrosModule.LogMessage("Hero already has a party");
                 return hero.PartyBelongedTo;
             }
 
             // Get spawn position
             var spawnPos = spawnSettlement.GatePosition;
+            var position = new Vec2(spawnPos.X, spawnPos.Y);
 
-            // Create party using clan's CreateNewMobileParty (simpler API)
-            MobileParty? party = null;
+            // Create a troop roster for the party
+            var memberRoster = TroopRoster.CreateDummyTroopRoster();
+            memberRoster.AddToCounts(hero.CharacterObject, 1); // Add hero
 
-            try
+            // Add some starting troops
+            if (clan.BasicTroop != null)
             {
-                // Try using clan method first
-                party = clan.CreateNewMobileParty(hero);
+                memberRoster.AddToCounts(clan.BasicTroop, 5);
             }
-            catch
+            if (clan.Culture?.EliteBasicTroop != null)
             {
-                // Fallback: try MobileParty.CreateParty with component
-                try
-                {
-                    var component = new LordPartyComponent(hero, hero);
-                    party = MobileParty.CreateParty($"coop_party_{hero.StringId}", component, delegate(MobileParty mp)
-                    {
-                        mp.ActualClan = clan;
-                    });
-                }
-                catch (Exception ex2)
-                {
-                    BannerBrosModule.LogMessage($"Fallback party creation failed: {ex2.Message}");
-                }
+                memberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
             }
+
+            var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
+
+            // Create the party component
+            var partyComponent = new LordPartyComponent(hero);
+
+            // Create the party
+            var partyId = $"coop_party_{hero.StringId}";
+            var party = MobileParty.CreateParty(partyId, partyComponent);
 
             if (party != null)
             {
-                // Set party position
-                party.Position2D = new Vec2(spawnPos.X, spawnPos.Y);
+                // Initialize at position with rosters
+                party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, position);
 
-                // Add initial troops
-                if (clan.BasicTroop != null)
-                {
-                    party.MemberRoster.AddToCounts(clan.BasicTroop, 5);
-                }
-                if (clan.Culture?.EliteBasicTroop != null)
-                {
-                    party.MemberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
-                }
+                // Set clan
+                party.ActualClan = clan;
 
-                BannerBrosModule.LogMessage($"Party created at {spawnPos.X}, {spawnPos.Y} with {party.MemberRoster.TotalManCount} troops");
+                BannerBrosModule.LogMessage($"Party {partyId} created with {party.MemberRoster.TotalManCount} troops");
             }
 
             return party;
@@ -472,7 +466,16 @@ public class SessionManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"CreatePlayerParty error: {ex.Message}");
-            return hero.PartyBelongedTo;
+
+            // Return existing party if any
+            try
+            {
+                return hero.PartyBelongedTo;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
