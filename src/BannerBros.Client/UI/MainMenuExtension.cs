@@ -329,24 +329,6 @@ public static class MainMenuExtension
         }
     }
 
-    private static void OnJoinConfirmed(string address)
-    {
-        var module = BannerBrosModule.Instance;
-        if (module == null) return;
-
-        // Parse address (could include port)
-        var parts = address.Split(':');
-        var host = parts[0];
-        var port = parts.Length > 1 && int.TryParse(parts[1], out var p) ? p : module.Config.DefaultPort;
-
-        // Save for next time
-        module.Config.LastServerAddress = address;
-
-        // Connect
-        module.JoinSession(host, port);
-
-        BannerBrosModule.LogMessage($"Connecting to {host}:{port}...");
-    }
 }
 
 /// <summary>
