@@ -26,6 +26,11 @@ public class BannerBrosModule : MBSubModuleBase
     public SessionManager SessionManager { get; private set; } = null!;
     public PlayerSaveData PlayerSaveData { get; set; } = new();
 
+    /// <summary>
+    /// Character data captured from character creation, pending to be sent to server.
+    /// </summary>
+    public ExportedCharacter? PendingExportedCharacter { get; set; }
+
     public bool IsHost { get; private set; }
     public bool IsConnected { get; private set; }
     public SessionState SessionState => SessionManager?.State ?? SessionState.Disconnected;

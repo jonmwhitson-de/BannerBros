@@ -2,6 +2,7 @@ using System.Reflection;
 using Newtonsoft.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
 using TaleWorlds.CampaignSystem.Roster;
@@ -180,13 +181,24 @@ public class SessionManager
             // Assign player ID
             var playerId = _nextPlayerId++;
 
+            // Check if client sent exported character data (from full character creation)
+            ExportedCharacter? exportedCharacter = null;
+            if (!string.IsNullOrEmpty(packet.ExportedCharacterJson))
+            {
+                exportedCharacter = ExportedCharacter.FromJson(packet.ExportedCharacterJson);
+                if (exportedCharacter != null)
+                {
+                    BannerBrosModule.LogMessage($"Received exported character: {exportedCharacter.Name}");
+                }
+            }
+
             // Check if this player has a saved character they can reclaim
             var savedCharacter = BannerBrosModule.Instance?.PlayerSaveData.FindCharacter(packet.PlayerName);
             bool hasValidSavedCharacter = savedCharacter != null && PlayerSaveData.IsHeroValid(savedCharacter.HeroId);
 
-            // Player needs character creation if they don't have a valid saved character
-            // and haven't indicated they have an existing one
-            bool requiresCharacterCreation = !hasValidSavedCharacter && !packet.HasExistingCharacter;
+            // Player needs character creation if:
+            // - No valid saved character AND no exported character AND hasn't indicated existing
+            bool requiresCharacterCreation = !hasValidSavedCharacter && exportedCharacter == null && !packet.HasExistingCharacter;
 
             // Build response with current world state
             var response = new JoinResponsePacket
@@ -197,7 +209,7 @@ public class SessionManager
                 ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
             };
 
-            // If player has a saved character, include that info so they can reclaim it
+            // If player has a saved character, include that info
             if (hasValidSavedCharacter && savedCharacter != null)
             {
                 response.WorldStateData = JsonConvert.SerializeObject(new SavedCharacterInfo
@@ -210,11 +222,11 @@ public class SessionManager
                 BannerBrosModule.LogMessage($"Player {packet.PlayerName} has saved character: {savedCharacter.HeroId}");
             }
 
-            // Send response
-            BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}, HasSaved={hasValidSavedCharacter}");
+            // Send response first
+            BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}");
             networkManager.SendTo(peerId, response);
 
-            // Create player entry (not fully initialized until character is created/loaded)
+            // Create player entry
             var player = new CoopPlayer
             {
                 NetworkId = playerId,
@@ -223,15 +235,44 @@ public class SessionManager
                 State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
             };
 
-            // If reclaiming saved character, link them now
-            if (hasValidSavedCharacter && savedCharacter != null)
+            // Handle the different cases:
+            if (exportedCharacter != null)
             {
+                // Client sent full character data - create hero from it
+                BannerBrosModule.LogMessage($"Creating hero from exported character data...");
+                var result = SpawnHeroFromExportedCharacter(exportedCharacter, player);
+
+                if (result.Success)
+                {
+                    player.HeroId = result.HeroId;
+                    player.ClanId = result.ClanId;
+                    player.PartyId = result.PartyId;
+                    player.MapPositionX = result.SpawnX;
+                    player.MapPositionY = result.SpawnY;
+                    player.State = PlayerState.OnMap;
+
+                    // Register for future reconnection
+                    BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
+                        player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
+
+                    // Send success response
+                    SendCharacterCreationResponse(peerId, playerId, true, null,
+                        result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+                }
+                else
+                {
+                    BannerBrosModule.LogMessage($"Failed to create hero: {result.ErrorMessage}");
+                    // Fall back to requiring character creation
+                    player.State = PlayerState.InMenu;
+                }
+            }
+            else if (hasValidSavedCharacter && savedCharacter != null)
+            {
+                // Reclaiming saved character
                 player.HeroId = savedCharacter.HeroId;
                 player.ClanId = savedCharacter.ClanId;
                 player.PartyId = savedCharacter.PartyId;
                 player.State = PlayerState.OnMap;
-
-                // Update their position from the hero's party
                 UpdatePlayerPositionFromHero(player);
             }
 
@@ -521,6 +562,367 @@ public class SessionManager
             BannerBrosModule.LogMessage($"SpawnPlayerHero error: {ex}");
             return new SpawnResult { Success = false, ErrorMessage = ex.Message };
         }
+    }
+
+    /// <summary>
+    /// Creates a hero from exported character data (from full character creation).
+    /// This applies all the captured attributes, skills, traits, appearance, and equipment.
+    /// </summary>
+    private SpawnResult SpawnHeroFromExportedCharacter(ExportedCharacter exportedChar, CoopPlayer player)
+    {
+        if (Campaign.Current == null)
+        {
+            return new SpawnResult { Success = false, ErrorMessage = "No active campaign" };
+        }
+
+        try
+        {
+            BannerBrosModule.LogMessage($"Creating hero from exported character: {exportedChar.Name}");
+
+            // Get the culture
+            var culture = MBObjectManager.Instance.GetObject<CultureObject>(exportedChar.CultureId);
+            if (culture == null)
+            {
+                culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
+                    .FirstOrDefault(c => c.IsMainCulture);
+                BannerBrosModule.LogMessage($"Culture '{exportedChar.CultureId}' not found, using default: {culture?.StringId}");
+            }
+
+            if (culture == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "No valid culture found" };
+            }
+
+            // Find a spawn settlement - prefer a town of matching culture
+            var spawnSettlement = Campaign.Current.Settlements
+                .Where(s => s.IsTown && s.Culture == culture)
+                .FirstOrDefault() ??
+                Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
+
+            if (spawnSettlement == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "No valid spawn location found" };
+            }
+
+            // Create a clan for this player
+            var clan = CreatePlayerClan(culture, exportedChar.Name);
+            if (clan == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "Failed to create clan" };
+            }
+
+            // Create the hero using HeroCreator
+            var characterTemplate = culture.BasicTroop;
+            var hero = HeroCreator.CreateSpecialHero(
+                characterTemplate,
+                spawnSettlement,
+                clan,
+                null,
+                (int)exportedChar.Age
+            );
+
+            if (hero == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "Failed to create hero" };
+            }
+
+            // Set hero name
+            hero.SetName(new TaleWorlds.Localization.TextObject(exportedChar.Name),
+                         new TaleWorlds.Localization.TextObject(exportedChar.Name));
+
+            // Set gender
+            try
+            {
+                // Use reflection to set IsFemale if needed
+                if (hero.IsFemale != exportedChar.IsFemale)
+                {
+                    var isFemaleField = typeof(Hero).GetField("_isFemale",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    isFemaleField?.SetValue(hero, exportedChar.IsFemale);
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Failed to set gender: {ex.Message}");
+            }
+
+            // Apply BodyProperties (appearance)
+            ApplyBodyProperties(hero, exportedChar.BodyPropertiesXml);
+
+            // Apply attributes
+            ApplyAttributes(hero, exportedChar.Attributes);
+
+            // Apply skills and focus points
+            ApplySkillsAndFocus(hero, exportedChar.Skills, exportedChar.FocusPoints);
+
+            // Apply traits
+            ApplyTraits(hero, exportedChar.Traits);
+
+            // Apply equipment
+            ApplyEquipment(hero, exportedChar.EquipmentIds);
+
+            // Set gold
+            try
+            {
+                hero.ChangeHeroGold(exportedChar.Gold - hero.Gold);
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Failed to set gold: {ex.Message}");
+            }
+
+            // Make this hero the clan leader
+            if (clan.Leader != hero)
+            {
+                clan.SetLeader(hero);
+            }
+
+            // Get spawn position from settlement
+            var spawnPos = spawnSettlement.GatePosition;
+            var spawnX = spawnPos.X;
+            var spawnY = spawnPos.Y;
+
+            // Create mobile party for the hero
+            MobileParty? party = CreatePlayerParty(hero, clan, spawnSettlement);
+
+            if (party == null)
+            {
+                BannerBrosModule.LogMessage("Warning: Party creation returned null, hero may not appear on map");
+            }
+            else
+            {
+                BannerBrosModule.LogMessage($"Created party {party.StringId} for player {exportedChar.Name}");
+            }
+
+            BannerBrosModule.LogMessage($"Successfully created hero {hero.Name} from exported character data");
+
+            return new SpawnResult
+            {
+                Success = true,
+                HeroId = hero.StringId,
+                PartyId = party?.StringId ?? "",
+                ClanId = clan.StringId,
+                SpawnX = spawnX,
+                SpawnY = spawnY
+            };
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"SpawnHeroFromExportedCharacter error: {ex}");
+            return new SpawnResult { Success = false, ErrorMessage = ex.Message };
+        }
+    }
+
+    private void ApplyBodyProperties(Hero hero, string bodyPropertiesXml)
+    {
+        if (string.IsNullOrEmpty(bodyPropertiesXml)) return;
+
+        try
+        {
+            // Try to parse the BodyProperties string
+            // Format is typically like: "<BodyProperties version=\"4\" age=\"25\" weight=\"0.5\" build=\"0.5\" key=\"..."
+            // or just the key value
+
+            if (BodyProperties.FromString(bodyPropertiesXml, out var bodyProps))
+            {
+                // Use reflection to set body properties
+                var charObjField = typeof(Hero).GetProperty("BodyProperties",
+                    BindingFlags.Public | BindingFlags.Instance);
+
+                if (charObjField?.CanWrite == true)
+                {
+                    charObjField.SetValue(hero, bodyProps);
+                    BannerBrosModule.LogMessage("Applied body properties to hero");
+                }
+                else
+                {
+                    // Try alternative method
+                    var staticBodyField = typeof(Hero).GetField("_staticBodyProperties",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (staticBodyField != null)
+                    {
+                        staticBodyField.SetValue(hero, bodyProps.StaticProperties);
+                        BannerBrosModule.LogMessage("Applied static body properties to hero");
+                    }
+                }
+            }
+            else
+            {
+                BannerBrosModule.LogMessage("Failed to parse body properties string");
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Failed to apply body properties: {ex.Message}");
+        }
+    }
+
+    private void ApplyAttributes(Hero hero, Dictionary<string, int> attributes)
+    {
+        if (attributes == null || attributes.Count == 0) return;
+
+        try
+        {
+            foreach (var attr in attributes)
+            {
+                if (Enum.TryParse<CharacterAttributesEnum>(attr.Key, out var attrEnum))
+                {
+                    var currentValue = hero.GetAttributeValue(attrEnum);
+                    var diff = attr.Value - currentValue;
+
+                    if (diff != 0 && hero.HeroDeveloper != null)
+                    {
+                        // Add attribute points
+                        hero.HeroDeveloper.AddAttribute(attrEnum, diff, false);
+                    }
+                }
+            }
+            BannerBrosModule.LogMessage($"Applied {attributes.Count} attributes to hero");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Failed to apply attributes: {ex.Message}");
+        }
+    }
+
+    private void ApplySkillsAndFocus(Hero hero, Dictionary<string, int> skills, Dictionary<string, int> focusPoints)
+    {
+        try
+        {
+            // Apply skills
+            if (skills != null && skills.Count > 0)
+            {
+                foreach (var skillEntry in skills)
+                {
+                    var skill = TaleWorlds.Core.Skills.All.FirstOrDefault(s => s.StringId == skillEntry.Key);
+                    if (skill != null)
+                    {
+                        var currentValue = hero.GetSkillValue(skill);
+                        var diff = skillEntry.Value - currentValue;
+
+                        if (diff > 0 && hero.HeroDeveloper != null)
+                        {
+                            hero.HeroDeveloper.ChangeSkillLevel(skill, diff, false);
+                        }
+                    }
+                }
+                BannerBrosModule.LogMessage($"Applied {skills.Count} skills to hero");
+            }
+
+            // Apply focus points
+            if (focusPoints != null && focusPoints.Count > 0 && hero.HeroDeveloper != null)
+            {
+                foreach (var focusEntry in focusPoints)
+                {
+                    var skill = TaleWorlds.Core.Skills.All.FirstOrDefault(s => s.StringId == focusEntry.Key);
+                    if (skill != null)
+                    {
+                        var currentFocus = hero.HeroDeveloper.GetFocus(skill);
+                        var diff = focusEntry.Value - currentFocus;
+
+                        if (diff > 0)
+                        {
+                            hero.HeroDeveloper.AddFocus(skill, diff, false);
+                        }
+                    }
+                }
+                BannerBrosModule.LogMessage($"Applied {focusPoints.Count} focus points to hero");
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Failed to apply skills/focus: {ex.Message}");
+        }
+    }
+
+    private void ApplyTraits(Hero hero, Dictionary<string, int> traits)
+    {
+        if (traits == null || traits.Count == 0) return;
+
+        try
+        {
+            foreach (var traitEntry in traits)
+            {
+                var trait = DefaultTraits.Personality.FirstOrDefault(t => t.StringId == traitEntry.Key);
+                if (trait != null)
+                {
+                    var currentLevel = hero.GetTraitLevel(trait);
+                    if (currentLevel != traitEntry.Value)
+                    {
+                        hero.SetTraitLevel(trait, traitEntry.Value);
+                    }
+                }
+            }
+            BannerBrosModule.LogMessage($"Applied {traits.Count} traits to hero");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Failed to apply traits: {ex.Message}");
+        }
+    }
+
+    private void ApplyEquipment(Hero hero, List<string> equipmentIds)
+    {
+        if (equipmentIds == null || equipmentIds.Count == 0) return;
+
+        try
+        {
+            var equipment = hero.BattleEquipment;
+            if (equipment == null) return;
+
+            int slotIndex = 0;
+            foreach (var itemId in equipmentIds)
+            {
+                if (slotIndex >= (int)EquipmentIndex.NumEquipmentSetSlots) break;
+
+                var item = MBObjectManager.Instance.GetObject<ItemObject>(itemId);
+                if (item != null)
+                {
+                    // Find appropriate slot for this item type
+                    var slot = GetEquipmentSlotForItem(item);
+                    if (slot != EquipmentIndex.None)
+                    {
+                        equipment[slot] = new EquipmentElement(item);
+                    }
+                }
+                slotIndex++;
+            }
+            BannerBrosModule.LogMessage($"Applied {equipmentIds.Count} equipment items to hero");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Failed to apply equipment: {ex.Message}");
+        }
+    }
+
+    private EquipmentIndex GetEquipmentSlotForItem(ItemObject item)
+    {
+        // Determine the appropriate equipment slot based on item type
+        if (item.HasWeaponComponent)
+        {
+            // Weapons go in weapon slots 0-3
+            return EquipmentIndex.Weapon0;
+        }
+        else if (item.HasHorseComponent)
+        {
+            return EquipmentIndex.Horse;
+        }
+        else if (item.HasArmorComponent)
+        {
+            var armorType = item.ArmorComponent?.BodyArmor;
+            if (item.ItemType == ItemObject.ItemTypeEnum.HeadArmor)
+                return EquipmentIndex.Head;
+            else if (item.ItemType == ItemObject.ItemTypeEnum.BodyArmor)
+                return EquipmentIndex.Body;
+            else if (item.ItemType == ItemObject.ItemTypeEnum.LegArmor)
+                return EquipmentIndex.Leg;
+            else if (item.ItemType == ItemObject.ItemTypeEnum.HandArmor)
+                return EquipmentIndex.Gloves;
+            else if (item.ItemType == ItemObject.ItemTypeEnum.Cape)
+                return EquipmentIndex.Cape;
+        }
+
+        return EquipmentIndex.None;
     }
 
     private MobileParty? CreatePlayerParty(Hero hero, Clan clan, Settlement spawnSettlement)
@@ -925,16 +1327,36 @@ public class SessionManager
 
     private void SendJoinRequest()
     {
-        var config = BannerBrosModule.Instance?.Config;
+        var module = BannerBrosModule.Instance;
+        var config = module?.Config;
+
+        // Check if we have exported character data to send
+        var exportedChar = module?.PendingExportedCharacter;
+        var hasExportedChar = exportedChar != null;
+
         var packet = new JoinRequestPacket
         {
-            PlayerName = config?.PlayerName ?? "Player",
+            PlayerName = exportedChar?.Name ?? config?.PlayerName ?? "Player",
             ModVersion = ModVersion,
-            HasExistingCharacter = false // TODO: check if we have saved character data
+            HasExistingCharacter = hasExportedChar,
+            ExportedCharacterJson = hasExportedChar ? exportedChar!.ToJson() : ""
         };
 
         NetworkManager.Instance?.SendToServer(packet);
-        BannerBrosModule.LogMessage("Sent join request to host");
+
+        if (hasExportedChar)
+        {
+            BannerBrosModule.LogMessage($"Sent join request with character: {exportedChar!.Name}");
+            // Clear pending character after sending to prevent re-send on reconnect
+            if (module != null)
+            {
+                module.PendingExportedCharacter = null;
+            }
+        }
+        else
+        {
+            BannerBrosModule.LogMessage("Sent join request to host");
+        }
     }
 
     private void HandleJoinResponse(JoinResponsePacket packet)

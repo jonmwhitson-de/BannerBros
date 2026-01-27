@@ -4,6 +4,7 @@ using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.ScreenSystem;
 using BannerBros.Core;
+using BannerBros.Core.Patches;
 
 namespace BannerBros.Client.UI;
 
@@ -103,37 +104,22 @@ public static class MainMenuExtension
         InformationManager.ShowInquiry(inquiry, true);
     }
 
+    // Store pending connection info during the join flow
+    private static string _pendingServerAddress = "";
+    private static int _pendingServerPort = 7777;
+
     public static void ShowJoinDialog()
     {
-        // For now, use a text inquiry for the IP address
-        // In a full implementation, this would be a proper UI screen
-        var inquiry = new InquiryData(
-            "Join Co-op Session",
-            "Enter the host's IP address to join their game.\n\nExample: 192.168.1.100",
-            true,
-            true,
-            "Join",
-            "Cancel",
-            () => ShowAddressInput(),
-            null
-        );
-
-        InformationManager.ShowInquiry(inquiry, true);
-    }
-
-    private static void ShowAddressInput()
-    {
-        // In Bannerlord, we'd use a text input inquiry
-        // For now, simulate with a default address
+        // First, get the server address
         InformationManager.ShowTextInquiry(
             new TextInquiryData(
-                "Enter Host Address",
-                "IP Address:",
+                "Join Co-op Session",
+                "Enter the host's IP address:\n\nExample: 192.168.1.100 or 192.168.1.100:7777",
                 true,
                 true,
-                "Connect",
+                "Next",
                 "Cancel",
-                OnJoinConfirmed,
+                OnServerAddressEntered,
                 null,
                 false,
                 text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
@@ -141,6 +127,179 @@ public static class MainMenuExtension
                 BannerBrosModule.Instance?.Config.LastServerAddress ?? ""
             )
         );
+    }
+
+    private static void OnServerAddressEntered(string address)
+    {
+        // Parse address
+        var parts = address.Split(':');
+        _pendingServerAddress = parts[0];
+        _pendingServerPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
+            ? p
+            : BannerBrosModule.Instance?.Config.DefaultPort ?? 7777;
+
+        // Save for next time
+        if (BannerBrosModule.Instance != null)
+        {
+            BannerBrosModule.Instance.Config.LastServerAddress = address;
+        }
+
+        // Now show the character selection dialog
+        ShowCharacterSelectionDialog();
+    }
+
+    private static void ShowCharacterSelectionDialog()
+    {
+        // Check if there are any saved characters
+        var savedFiles = ExportedCharacter.GetSavedCharacterFiles();
+        var hasSavedCharacters = savedFiles.Count > 0;
+
+        var message = hasSavedCharacters
+            ? $"Server: {_pendingServerAddress}:{_pendingServerPort}\n\n" +
+              "Choose how to join:\n\n" +
+              "• New Character - Go through full character creation\n" +
+              "• Load Character - Use a previously created character"
+            : $"Server: {_pendingServerAddress}:{_pendingServerPort}\n\n" +
+              "You'll need to create a new character to join.\n\n" +
+              "This will start Bannerlord's character creation.\n" +
+              "After creation, you'll automatically join the server.";
+
+        if (hasSavedCharacters)
+        {
+            var inquiry = new InquiryData(
+                "Join Co-op Session",
+                message,
+                true,
+                true,
+                "New Character",
+                "Load Character",
+                OnNewCharacterSelected,
+                OnLoadCharacterSelected
+            );
+            InformationManager.ShowInquiry(inquiry, true);
+        }
+        else
+        {
+            var inquiry = new InquiryData(
+                "Join Co-op Session",
+                message,
+                true,
+                true,
+                "Create Character",
+                "Cancel",
+                OnNewCharacterSelected,
+                null
+            );
+            InformationManager.ShowInquiry(inquiry, true);
+        }
+    }
+
+    private static void OnNewCharacterSelected()
+    {
+        BannerBrosModule.LogMessage("Starting character creation for co-op...");
+        BannerBrosModule.LogMessage("Complete character creation, then you'll join automatically.");
+
+        // Set up the co-op export mode
+        CharacterCreationPatches.StartCoopCharacterCreation(_pendingServerAddress, _pendingServerPort);
+
+        // Show instructions
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Create Your Character",
+                "You'll now go through Bannerlord's character creation.\n\n" +
+                "1. Click 'Campaign' on the main menu\n" +
+                "2. Start a 'New Campaign' (Sandbox or Story)\n" +
+                "3. Complete character creation normally\n" +
+                "4. When the map loads, your character will be captured\n" +
+                "5. You'll be prompted to join the co-op server\n\n" +
+                "DO NOT SAVE the temporary campaign!",
+                true,
+                false,
+                "Got it!",
+                "",
+                null,
+                null
+            ),
+            true
+        );
+    }
+
+    private static void OnLoadCharacterSelected()
+    {
+        var savedFiles = ExportedCharacter.GetSavedCharacterFiles();
+
+        if (savedFiles.Count == 0)
+        {
+            BannerBrosModule.LogMessage("No saved characters found");
+            ShowCharacterSelectionDialog();
+            return;
+        }
+
+        // Build a list of saved characters
+        var elements = new List<InquiryElement>();
+        foreach (var file in savedFiles)
+        {
+            var character = ExportedCharacter.LoadFromFile(file);
+            if (character != null)
+            {
+                var fileName = Path.GetFileNameWithoutExtension(file);
+                var desc = $"{character.CultureId} - Created {character.CreatedAt:MMM dd, yyyy}";
+                elements.Add(new InquiryElement(file, character.Name, null, true, desc));
+            }
+        }
+
+        if (elements.Count == 0)
+        {
+            BannerBrosModule.LogMessage("No valid saved characters found");
+            OnNewCharacterSelected();
+            return;
+        }
+
+        var inquiry = new MultiSelectionInquiryData(
+            "Select Character",
+            "Choose a character to join with:",
+            elements,
+            true,
+            1,
+            1,
+            "Join",
+            "Back",
+            OnCharacterFileSelected,
+            _ => ShowCharacterSelectionDialog()
+        );
+
+        MBInformationManager.ShowMultiSelectionInquiry(inquiry, true);
+    }
+
+    private static void OnCharacterFileSelected(List<InquiryElement> selected)
+    {
+        if (selected.Count == 0) return;
+
+        var filePath = selected[0].Identifier as string;
+        if (string.IsNullOrEmpty(filePath)) return;
+
+        var character = ExportedCharacter.LoadFromFile(filePath);
+        if (character == null)
+        {
+            BannerBrosModule.LogMessage("Failed to load character file");
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"Joining as {character.Name}...");
+
+        // Store the character and connect
+        var module = BannerBrosModule.Instance;
+        if (module != null)
+        {
+            module.PendingExportedCharacter = character;
+            module.JoinSession(_pendingServerAddress, _pendingServerPort);
+        }
+    }
+
+    // Legacy method - kept for compatibility
+    private static void OnJoinConfirmed(string address)
+    {
+        OnServerAddressEntered(address);
     }
 
     private static void OnHostNewCampaign()

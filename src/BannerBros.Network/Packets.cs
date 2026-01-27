@@ -138,6 +138,14 @@ public class JoinRequestPacket
     public string PlayerName { get; set; } = "";
     public string ModVersion { get; set; } = "";
     public bool HasExistingCharacter { get; set; }
+    /// <summary>
+    /// Full exported character data JSON (from Bannerlord character creation).
+    /// If present, server will create the character from this data.
+    /// </summary>
+    public string ExportedCharacterJson { get; set; } = "";
+    /// <summary>
+    /// Legacy field for simpler character data.
+    /// </summary>
     public string CharacterData { get; set; } = "";
 }
 
@@ -153,6 +161,10 @@ public class JoinResponsePacket
     // Existing players serialized as JSON
     public string ExistingPlayersJson { get; set; } = "";
     public bool RequiresCharacterCreation { get; set; }
+    /// <summary>
+    /// List of characters available for this player to load (JSON array of SavedCharacterInfo).
+    /// </summary>
+    public string AvailableCharactersJson { get; set; } = "";
 }
 
 public class ConnectedPlayerInfo
