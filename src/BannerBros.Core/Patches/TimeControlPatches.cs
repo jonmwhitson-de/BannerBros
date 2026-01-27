@@ -23,13 +23,20 @@ public static class TimeControlPatches
     {
         public static bool Prefix(ref CampaignTimeControlMode value)
         {
-            if (!IsInCoopSession) return true;
-
-            // Block any attempt to stop/pause time
-            if (value == CampaignTimeControlMode.Stop)
+            try
             {
-                BannerBrosModule.LogMessage("Co-op: Time cannot be paused");
-                value = CampaignTimeControlMode.StoppablePlay;
+                if (!IsInCoopSession) return true;
+
+                // Block any attempt to stop/pause time
+                if (value == CampaignTimeControlMode.Stop)
+                {
+                    BannerBrosModule.LogMessage("Co-op: Time cannot be paused");
+                    value = CampaignTimeControlMode.StoppablePlay;
+                }
+            }
+            catch
+            {
+                // Ignore errors in time control patch
             }
 
             return true;
@@ -51,10 +58,17 @@ public static class MapScreenTimePatches
     {
         public static void Postfix(ref bool __result)
         {
-            // In co-op, always report time as not paused
-            if (TimeControlPatches.IsInCoopSession)
+            try
             {
-                __result = false;
+                // In co-op, always report time as not paused
+                if (TimeControlPatches.IsInCoopSession)
+                {
+                    __result = false;
+                }
+            }
+            catch
+            {
+                // Ignore errors
             }
         }
     }
@@ -67,10 +81,17 @@ public static class MapScreenTimePatches
     {
         public static bool Prefix()
         {
-            if (!TimeControlPatches.IsInCoopSession) return true;
+            try
+            {
+                if (!TimeControlPatches.IsInCoopSession) return true;
 
-            BannerBrosModule.LogMessage("Time is controlled by the host in co-op");
-            return false;
+                BannerBrosModule.LogMessage("Time is controlled by the host in co-op");
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
         }
     }
 
@@ -82,10 +103,17 @@ public static class MapScreenTimePatches
     {
         public static bool Prefix()
         {
-            if (!TimeControlPatches.IsInCoopSession) return true;
+            try
+            {
+                if (!TimeControlPatches.IsInCoopSession) return true;
 
-            BannerBrosModule.LogMessage("Time speed is controlled by host");
-            return false;
+                BannerBrosModule.LogMessage("Time speed is controlled by host");
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
         }
     }
 }

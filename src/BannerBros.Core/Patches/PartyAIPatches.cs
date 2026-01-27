@@ -71,10 +71,17 @@ public static class PartyAIPatches
     {
         public static bool Prefix(MobileParty targetParty)
         {
-            if (IsPartyProtected(targetParty))
+            try
             {
-                // Cancel the engage action - party is protected
-                return false;
+                if (IsPartyProtected(targetParty))
+                {
+                    // Cancel the engage action - party is protected
+                    return false;
+                }
+            }
+            catch
+            {
+                // Ignore errors
             }
             return true;
         }
@@ -89,9 +96,16 @@ public static class PartyAIPatches
     {
         public static void Postfix(MobileParty targetParty, ref bool __result)
         {
-            if (__result && IsPartyProtected(targetParty))
+            try
             {
-                __result = false;
+                if (__result && IsPartyProtected(targetParty))
+                {
+                    __result = false;
+                }
+            }
+            catch
+            {
+                // Ignore errors
             }
         }
     }
@@ -105,10 +119,17 @@ public static class PartyAIPatches
     {
         public static void Postfix(MobileParty targetParty, ref float __result)
         {
-            if (IsPartyProtected(targetParty))
+            try
             {
-                // Set score to very negative so AI won't consider attacking
-                __result = float.MinValue;
+                if (IsPartyProtected(targetParty))
+                {
+                    // Set score to very negative so AI won't consider attacking
+                    __result = float.MinValue;
+                }
+            }
+            catch
+            {
+                // Ignore errors
             }
         }
     }
@@ -128,18 +149,25 @@ public static class EncounterPatches
     {
         public static bool Prefix(MobileParty __instance, MobileParty other)
         {
-            // Check if either party is a protected player
-            if (PartyAIPatches.IsPartyProtected(other))
+            try
             {
-                BannerBrosModule.LogMessage($"Cannot engage - player is protected");
-                return false;
-            }
+                // Check if either party is a protected player
+                if (PartyAIPatches.IsPartyProtected(other))
+                {
+                    BannerBrosModule.LogMessage($"Cannot engage - player is protected");
+                    return false;
+                }
 
-            // Also prevent the encounter if WE are the protected party
-            // (shouldn't happen but defensive check)
-            if (PartyAIPatches.IsPartyProtected(__instance))
+                // Also prevent the encounter if WE are the protected party
+                // (shouldn't happen but defensive check)
+                if (PartyAIPatches.IsPartyProtected(__instance))
+                {
+                    return false;
+                }
+            }
+            catch
             {
-                return false;
+                // Ignore errors
             }
 
             return true;
@@ -161,7 +189,14 @@ public static class PlayerStatePatches
     {
         public static void Postfix()
         {
-            UpdateLocalPlayerState(PlayerState.InDialogue);
+            try
+            {
+                UpdateLocalPlayerState(PlayerState.InDialogue);
+            }
+            catch
+            {
+                // Ignore errors
+            }
         }
     }
 
@@ -173,7 +208,14 @@ public static class PlayerStatePatches
     {
         public static void Postfix()
         {
-            UpdateLocalPlayerState(PlayerState.OnMap);
+            try
+            {
+                UpdateLocalPlayerState(PlayerState.OnMap);
+            }
+            catch
+            {
+                // Ignore errors
+            }
         }
     }
 

@@ -126,7 +126,15 @@ public class NetworkManager : INetEventListener
 
     public void Update(float dt)
     {
-        _netManager?.PollEvents();
+        try
+        {
+            _netManager?.PollEvents();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BannerBros.Network] ERROR in PollEvents: {ex.Message}");
+            Console.WriteLine($"[BannerBros.Network] Stack trace: {ex.StackTrace}");
+        }
     }
 
     public void Send<T>(T packet, DeliveryMethod deliveryMethod = DeliveryMethod.ReliableOrdered) where T : class, new()
@@ -209,17 +217,24 @@ public class NetworkManager : INetEventListener
 
     void INetEventListener.OnPeerConnected(NetPeer peer)
     {
-        var peerId = peer.Id;
-        _peers[peerId] = peer;
-
-        // For clients, track the server connection
-        if (!_isHost)
+        try
         {
-            _serverPeer = peer;
-        }
+            var peerId = peer.Id;
+            _peers[peerId] = peer;
 
-        Console.WriteLine($"[BannerBros.Network] Peer {peerId} connected from {peer.Address}");
-        PeerConnected?.Invoke(peerId);
+            // For clients, track the server connection
+            if (!_isHost)
+            {
+                _serverPeer = peer;
+            }
+
+            Console.WriteLine($"[BannerBros.Network] Peer {peerId} connected from {peer.Address}");
+            PeerConnected?.Invoke(peerId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BannerBros.Network] ERROR in OnPeerConnected: {ex.Message}");
+        }
     }
 
     void INetEventListener.OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
@@ -267,7 +282,15 @@ public class NetworkManager : INetEventListener
 
     void INetEventListener.OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
     {
-        _packetProcessor.ReadAllPackets(reader, peer);
+        try
+        {
+            _packetProcessor.ReadAllPackets(reader, peer);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BannerBros.Network] ERROR processing packet from peer {peer.Id}: {ex.Message}");
+            Console.WriteLine($"[BannerBros.Network] Stack trace: {ex.StackTrace}");
+        }
     }
 
     void INetEventListener.OnNetworkReceiveUnconnected(System.Net.IPEndPoint remoteEndPoint, NetPacketReader reader, UnconnectedMessageType messageType)

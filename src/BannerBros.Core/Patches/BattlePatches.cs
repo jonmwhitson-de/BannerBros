@@ -23,56 +23,63 @@ public static class BattlePatches
     {
         public static void Postfix(MapEvent __instance)
         {
-            var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
-
-            // Check if local player is involved in this battle
-            var localPlayer = module.PlayerManager.GetLocalPlayer();
-            if (localPlayer == null) return;
-
-            // Get the parties involved
-            var attackerParty = __instance.AttackerSide?.LeaderParty?.MobileParty;
-            var defenderParty = __instance.DefenderSide?.LeaderParty?.MobileParty;
-
-            bool isLocalPlayerBattle = false;
-            BattleSide localSide = BattleSide.Attacker;
-
-            if (attackerParty?.StringId == localPlayer.PartyId)
+            try
             {
-                isLocalPlayerBattle = true;
-                localSide = BattleSide.Attacker;
-            }
-            else if (defenderParty?.StringId == localPlayer.PartyId)
-            {
-                isLocalPlayerBattle = true;
-                localSide = BattleSide.Defender;
-            }
+                var module = BannerBrosModule.Instance;
+                if (module?.IsConnected != true) return;
 
-            if (isLocalPlayerBattle)
-            {
-                // Create battle instance and broadcast
-                var position = __instance.Position;
-                var battleId = module.WorldStateManager.CreateBattle(
-                    localPlayer.NetworkId,
-                    $"{position.X},{position.Y}",
-                    localSide
-                );
+                // Check if local player is involved in this battle
+                var localPlayer = module.PlayerManager.GetLocalPlayer();
+                if (localPlayer == null) return;
 
-                localPlayer.State = PlayerState.InBattle;
-                localPlayer.CurrentBattleId = battleId;
+                // Get the parties involved
+                var attackerParty = __instance.AttackerSide?.LeaderParty?.MobileParty;
+                var defenderParty = __instance.DefenderSide?.LeaderParty?.MobileParty;
 
-                // Send network notification
-                var packet = new BattleEventPacket
+                bool isLocalPlayerBattle = false;
+                BattleSide localSide = BattleSide.Attacker;
+
+                if (attackerParty?.StringId == localPlayer.PartyId)
                 {
-                    EventType = (int)BattleEventType.Started,
-                    BattleId = battleId,
-                    PlayerId = localPlayer.NetworkId,
-                    MapPosition = $"{position.X},{position.Y}",
-                    Side = (int)localSide
-                };
-                NetworkManager.Instance?.Send(packet);
+                    isLocalPlayerBattle = true;
+                    localSide = BattleSide.Attacker;
+                }
+                else if (defenderParty?.StringId == localPlayer.PartyId)
+                {
+                    isLocalPlayerBattle = true;
+                    localSide = BattleSide.Defender;
+                }
 
-                BannerBrosModule.LogMessage($"Battle started at {position}");
+                if (isLocalPlayerBattle)
+                {
+                    // Create battle instance and broadcast
+                    var position = __instance.Position;
+                    var battleId = module.WorldStateManager.CreateBattle(
+                        localPlayer.NetworkId,
+                        $"{position.X},{position.Y}",
+                        localSide
+                    );
+
+                    localPlayer.State = PlayerState.InBattle;
+                    localPlayer.CurrentBattleId = battleId;
+
+                    // Send network notification
+                    var packet = new BattleEventPacket
+                    {
+                        EventType = (int)BattleEventType.Started,
+                        BattleId = battleId,
+                        PlayerId = localPlayer.NetworkId,
+                        MapPosition = $"{position.X},{position.Y}",
+                        Side = (int)localSide
+                    };
+                    NetworkManager.Instance?.Send(packet);
+
+                    BannerBrosModule.LogMessage($"Battle started at {position}");
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"MapEventCreated patch error: {ex.Message}");
             }
         }
     }
@@ -86,33 +93,40 @@ public static class BattlePatches
     {
         public static void Postfix(MapEvent __instance)
         {
-            var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
-
-            var localPlayer = module.PlayerManager.GetLocalPlayer();
-            if (localPlayer?.CurrentBattleId == null) return;
-
-            // End the battle
-            module.WorldStateManager.EndBattle(localPlayer.CurrentBattleId);
-
-            // Determine outcome
-            var eventType = __instance.BattleState switch
+            try
             {
-                BattleState.AttackerVictory => BattleEventType.VictoryAttacker,
-                BattleState.DefenderVictory => BattleEventType.VictoryDefender,
-                _ => BattleEventType.Ended
-            };
+                var module = BannerBrosModule.Instance;
+                if (module?.IsConnected != true) return;
 
-            var packet = new BattleEventPacket
+                var localPlayer = module.PlayerManager.GetLocalPlayer();
+                if (localPlayer?.CurrentBattleId == null) return;
+
+                // End the battle
+                module.WorldStateManager.EndBattle(localPlayer.CurrentBattleId);
+
+                // Determine outcome
+                var eventType = __instance.BattleState switch
+                {
+                    BattleState.AttackerVictory => BattleEventType.VictoryAttacker,
+                    BattleState.DefenderVictory => BattleEventType.VictoryDefender,
+                    _ => BattleEventType.Ended
+                };
+
+                var packet = new BattleEventPacket
+                {
+                    EventType = (int)eventType,
+                    BattleId = localPlayer.CurrentBattleId,
+                    PlayerId = localPlayer.NetworkId
+                };
+                NetworkManager.Instance?.Send(packet);
+
+                localPlayer.State = PlayerState.OnMap;
+                localPlayer.CurrentBattleId = null;
+            }
+            catch (Exception ex)
             {
-                EventType = (int)eventType,
-                BattleId = localPlayer.CurrentBattleId,
-                PlayerId = localPlayer.NetworkId
-            };
-            NetworkManager.Instance?.Send(packet);
-
-            localPlayer.State = PlayerState.OnMap;
-            localPlayer.CurrentBattleId = null;
+                BannerBrosModule.LogMessage($"MapEventEnded patch error: {ex.Message}");
+            }
         }
     }
 
@@ -125,36 +139,43 @@ public static class BattlePatches
     {
         public static void Postfix(MapEvent __instance, MobileParty mobileParty, BattleSideEnum side)
         {
-            var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
-
-            // Check if this is a co-op player joining
-            var localPlayer = module.PlayerManager.GetLocalPlayer();
-            if (localPlayer == null || mobileParty.StringId != localPlayer.PartyId) return;
-
-            // Find the battle instance
-            var position = __instance.Position;
-            var battle = module.WorldStateManager.FindBattleAtPosition(position.X, position.Y, 2.0f);
-
-            if (battle != null && battle.InitiatorPlayerId != localPlayer.NetworkId)
+            try
             {
-                // Joining someone else's battle
-                var battleSide = side == BattleSideEnum.Attacker ? BattleSide.Attacker : BattleSide.Defender;
-                module.WorldStateManager.JoinBattle(battle.BattleId, localPlayer.NetworkId, battleSide);
+                var module = BannerBrosModule.Instance;
+                if (module?.IsConnected != true) return;
 
-                localPlayer.State = PlayerState.InBattle;
-                localPlayer.CurrentBattleId = battle.BattleId;
+                // Check if this is a co-op player joining
+                var localPlayer = module.PlayerManager.GetLocalPlayer();
+                if (localPlayer == null || mobileParty?.StringId != localPlayer.PartyId) return;
 
-                var packet = new BattleEventPacket
+                // Find the battle instance
+                var position = __instance.Position;
+                var battle = module.WorldStateManager.FindBattleAtPosition(position.X, position.Y, 2.0f);
+
+                if (battle != null && battle.InitiatorPlayerId != localPlayer.NetworkId)
                 {
-                    EventType = (int)BattleEventType.PlayerJoined,
-                    BattleId = battle.BattleId,
-                    PlayerId = localPlayer.NetworkId,
-                    Side = (int)battleSide
-                };
-                NetworkManager.Instance?.Send(packet);
+                    // Joining someone else's battle
+                    var battleSide = side == BattleSideEnum.Attacker ? BattleSide.Attacker : BattleSide.Defender;
+                    module.WorldStateManager.JoinBattle(battle.BattleId, localPlayer.NetworkId, battleSide);
 
-                BannerBrosModule.LogMessage($"Joined battle as {battleSide}");
+                    localPlayer.State = PlayerState.InBattle;
+                    localPlayer.CurrentBattleId = battle.BattleId;
+
+                    var packet = new BattleEventPacket
+                    {
+                        EventType = (int)BattleEventType.PlayerJoined,
+                        BattleId = battle.BattleId,
+                        PlayerId = localPlayer.NetworkId,
+                        Side = (int)battleSide
+                    };
+                    NetworkManager.Instance?.Send(packet);
+
+                    BannerBrosModule.LogMessage($"Joined battle as {battleSide}");
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"AddPartyToEvent patch error: {ex.Message}");
             }
         }
     }
@@ -175,14 +196,21 @@ public static class MissionPatches
     {
         public static void Postfix(Mission __instance)
         {
-            var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
+            try
+            {
+                var module = BannerBrosModule.Instance;
+                if (module?.IsConnected != true) return;
 
-            var localPlayer = module.PlayerManager.GetLocalPlayer();
-            if (localPlayer?.State != PlayerState.InBattle) return;
+                var localPlayer = module.PlayerManager.GetLocalPlayer();
+                if (localPlayer?.State != PlayerState.InBattle) return;
 
-            // Mission started while in co-op battle
-            // Additional setup for multiplayer battle sync would go here
+                // Mission started while in co-op battle
+                // Additional setup for multiplayer battle sync would go here
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"MissionInitialize patch error: {ex.Message}");
+            }
         }
     }
 
@@ -194,30 +222,37 @@ public static class MissionPatches
     {
         public static void Prefix(Mission __instance)
         {
-            var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
-
-            var localPlayer = module.PlayerManager.GetLocalPlayer();
-            if (localPlayer?.CurrentBattleId == null) return;
-
-            // Notify network of retreat
-            var packet = new BattleEventPacket
+            try
             {
-                EventType = (int)BattleEventType.Retreat,
-                BattleId = localPlayer.CurrentBattleId,
-                PlayerId = localPlayer.NetworkId
-            };
-            NetworkManager.Instance?.Send(packet);
+                var module = BannerBrosModule.Instance;
+                if (module?.IsConnected != true) return;
 
-            // Leave the battle
-            var battle = module.WorldStateManager.GetBattle(localPlayer.CurrentBattleId);
-            if (battle != null)
-            {
-                battle.PlayerSides.Remove(localPlayer.NetworkId);
+                var localPlayer = module.PlayerManager.GetLocalPlayer();
+                if (localPlayer?.CurrentBattleId == null) return;
+
+                // Notify network of retreat
+                var packet = new BattleEventPacket
+                {
+                    EventType = (int)BattleEventType.Retreat,
+                    BattleId = localPlayer.CurrentBattleId,
+                    PlayerId = localPlayer.NetworkId
+                };
+                NetworkManager.Instance?.Send(packet);
+
+                // Leave the battle
+                var battle = module.WorldStateManager.GetBattle(localPlayer.CurrentBattleId);
+                if (battle != null)
+                {
+                    battle.PlayerSides.Remove(localPlayer.NetworkId);
+                }
+
+                localPlayer.CurrentBattleId = null;
+                localPlayer.State = PlayerState.OnMap;
             }
-
-            localPlayer.CurrentBattleId = null;
-            localPlayer.State = PlayerState.OnMap;
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"RetreatMission patch error: {ex.Message}");
+            }
         }
     }
 }
