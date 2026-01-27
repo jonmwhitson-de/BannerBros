@@ -936,18 +936,30 @@ public class SessionManager
             var spawnY = spawnPos.Y;
             DebugFileLog.Log($"Step 15: SUCCESS - Position: {spawnX}, {spawnY}");
 
-            // Create party
-            DebugFileLog.Log("Step 16: Creating party");
-            MobileParty? party = CreatePlayerParty(hero, clan, spawnSettlement);
+            // DEBUG: Set to true to skip party creation and test if hero alone causes crash
+            const bool SKIP_PARTY_CREATION_DEBUG = true;
 
-            if (party == null)
+            MobileParty? party = null;
+            if (!SKIP_PARTY_CREATION_DEBUG)
             {
-                DebugFileLog.Log("Step 16: WARNING - Party is null");
-                BannerBrosModule.LogMessage("Warning: Party creation returned null, hero may not appear on map");
+                // Create party
+                DebugFileLog.Log("Step 16: Creating party");
+                party = CreatePlayerParty(hero, clan, spawnSettlement);
+
+                if (party == null)
+                {
+                    DebugFileLog.Log("Step 16: WARNING - Party is null");
+                    BannerBrosModule.LogMessage("Warning: Party creation returned null, hero may not appear on map");
+                }
+                else
+                {
+                    DebugFileLog.Log($"Step 16: SUCCESS - Party: {party.StringId}");
+                }
             }
             else
             {
-                DebugFileLog.Log($"Step 16: SUCCESS - Party: {party.StringId}");
+                DebugFileLog.Log("Step 16: SKIPPED - Party creation disabled for debug");
+                BannerBrosModule.LogMessage("DEBUG: Skipping party creation to isolate crash");
             }
 
             DebugFileLog.Log("Step 17: Building result");
