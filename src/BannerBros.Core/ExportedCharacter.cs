@@ -99,27 +99,25 @@ public class ExportedCharacter
         {
             // Try getting attributes via CharacterAttributes enum
             var attrNames = new[] { "Vigor", "Control", "Endurance", "Cunning", "Social", "Intelligence" };
-            foreach (var attrName in attrNames)
+            var enumType = typeof(Hero).Assembly.GetType("TaleWorlds.CampaignSystem.CharacterDevelopment.CharacterAttributesEnum");
+            var getAttrMethod = hero.GetType().GetMethod("GetAttributeValue");
+
+            if (enumType != null && getAttrMethod != null)
             {
-                try
+                foreach (var attrName in attrNames)
                 {
-                    // Use reflection to get attribute value
-                    var getAttrMethod = hero.GetType().GetMethod("GetAttributeValue");
-                    if (getAttrMethod != null)
+                    try
                     {
-                        // Try to find the enum type and value
-                        var enumType = typeof(Hero).Assembly.GetType("TaleWorlds.CampaignSystem.CharacterDevelopment.CharacterAttributesEnum");
-                        if (enumType != null && Enum.TryParse(enumType, attrName, out var attrEnum))
+                        // Use Enum.Parse with the runtime type
+                        var attrEnum = Enum.Parse(enumType, attrName);
+                        var value = getAttrMethod.Invoke(hero, new object[] { attrEnum });
+                        if (value is int intValue)
                         {
-                            var value = getAttrMethod.Invoke(hero, new[] { attrEnum });
-                            if (value is int intValue)
-                            {
-                                exported.Attributes[attrName] = intValue;
-                            }
+                            exported.Attributes[attrName] = intValue;
                         }
                     }
+                    catch { }
                 }
-                catch { }
             }
             BannerBrosModule.LogMessage($"Captured {exported.Attributes.Count} attributes");
         }

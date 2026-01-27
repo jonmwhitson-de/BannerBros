@@ -779,16 +779,15 @@ public class SessionManager
             {
                 try
                 {
-                    if (Enum.TryParse(enumType, attr.Key, out var attrEnum))
-                    {
-                        var currentValue = (int)(getAttrMethod.Invoke(hero, new[] { attrEnum }) ?? 0);
-                        var diff = attr.Value - currentValue;
+                    // Use Enum.Parse instead of TryParse for runtime type
+                    var attrEnum = Enum.Parse(enumType, attr.Key);
+                    var currentValue = (int)(getAttrMethod.Invoke(hero, new object[] { attrEnum }) ?? 0);
+                    var diff = attr.Value - currentValue;
 
-                        if (diff != 0 && addAttrMethod != null && hero.HeroDeveloper != null)
-                        {
-                            addAttrMethod.Invoke(hero.HeroDeveloper, new object[] { attrEnum, diff, false });
-                            appliedCount++;
-                        }
+                    if (diff != 0 && addAttrMethod != null && hero.HeroDeveloper != null)
+                    {
+                        addAttrMethod.Invoke(hero.HeroDeveloper, new object[] { attrEnum, diff, false });
+                        appliedCount++;
                     }
                 }
                 catch { }
@@ -1141,27 +1140,48 @@ public class SessionManager
 
                     var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
 
-                    // Initialize party position - try multiple approaches for API compatibility
+                    // Initialize party position - use settlement's gate position
+                    var gatePos = settlement.GatePosition;
+                    var posVec2 = new Vec2(gatePos.X, gatePos.Y);
+
+                    // Try to initialize the party at position using reflection for API compatibility
+                    bool initialized = false;
                     try
                     {
-                        // Try InitializeMobilePartyAroundPosition (newer API)
-                        party.InitializeMobilePartyAroundPosition(settlement.Position2D, 1f);
+                        // Try InitializeMobilePartyAroundPosition
+                        var initMethod = party.GetType().GetMethod("InitializeMobilePartyAroundPosition");
+                        if (initMethod != null)
+                        {
+                            initMethod.Invoke(party, new object[] { posVec2, 1f });
+                            initialized = true;
+                        }
                     }
-                    catch
+                    catch { }
+
+                    if (!initialized)
                     {
                         try
                         {
-                            // Try using GatePosition
-                            var gatePos = settlement.GatePosition;
-                            var posVec2 = new Vec2(gatePos.X, gatePos.Y);
-                            party.Position2D = posVec2;
+                            // Try InitializeMobilePartyAtPosition
+                            var initMethod = party.GetType().GetMethod("InitializeMobilePartyAtPosition");
+                            if (initMethod != null)
+                            {
+                                initMethod.Invoke(party, new object[] { memberRoster, prisonerRoster, posVec2 });
+                                initialized = true;
+                            }
                         }
-                        catch
+                        catch { }
+                    }
+
+                    if (!initialized)
+                    {
+                        // Last resort - just set position via reflection
+                        try
                         {
-                            // Last resort - use reflection
-                            var pos2d = settlement.GetPosition2D;
-                            party.Position2D = pos2d;
+                            var posProp = party.GetType().GetProperty("Position2D");
+                            posProp?.SetValue(party, posVec2);
                         }
+                        catch { }
                     }
 
                     party.MemberRoster.Add(memberRoster);

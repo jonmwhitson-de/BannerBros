@@ -91,8 +91,26 @@ public static class CharacterCreationFinalizedPatch
     /// </summary>
     static MethodBase? TargetMethod()
     {
-        // Try to find CharacterCreationState.OnCharacterCreationFinalized or similar
-        var stateType = typeof(CharacterCreationState);
+        // Try to find CharacterCreationState via reflection since it may be in different namespaces
+        var assembly = typeof(Campaign).Assembly;
+        var stateTypeNames = new[]
+        {
+            "TaleWorlds.CampaignSystem.GameState.CharacterCreationState",
+            "TaleWorlds.CampaignSystem.CharacterCreationState",
+            "TaleWorlds.MountAndBlade.CharacterCreationState"
+        };
+
+        Type? stateType = null;
+        foreach (var typeName in stateTypeNames)
+        {
+            stateType = assembly.GetType(typeName);
+            if (stateType != null) break;
+        }
+
+        if (stateType == null)
+        {
+            return null;
+        }
 
         // Try various method names that might exist
         var methodNames = new[]
