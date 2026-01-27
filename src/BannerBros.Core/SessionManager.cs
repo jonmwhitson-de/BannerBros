@@ -421,28 +421,48 @@ public class SessionManager
                 return hero.PartyBelongedTo;
             }
 
-            // Create a lord party component for this hero
-            var partyComponent = LordPartyComponent.CreateLordPartyComponent(hero);
+            // Get spawn position
+            var spawnPos = spawnSettlement.GatePosition;
 
-            // Create the party using the standard API
-            var partyId = $"coop_party_{hero.StringId}";
-            var party = MobileParty.CreateParty(partyId, partyComponent, delegate(MobileParty mobileParty)
+            // Create party using clan's CreateNewMobileParty (simpler API)
+            MobileParty? party = null;
+
+            try
             {
-                mobileParty.ActualClan = clan;
-            });
+                // Try using clan method first
+                party = clan.CreateNewMobileParty(hero);
+            }
+            catch
+            {
+                // Fallback: try MobileParty.CreateParty with component
+                try
+                {
+                    var component = new LordPartyComponent(hero, hero);
+                    party = MobileParty.CreateParty($"coop_party_{hero.StringId}", component, delegate(MobileParty mp)
+                    {
+                        mp.ActualClan = clan;
+                    });
+                }
+                catch (Exception ex2)
+                {
+                    BannerBrosModule.LogMessage($"Fallback party creation failed: {ex2.Message}");
+                }
+            }
 
             if (party != null)
             {
-                // Set party position at spawn settlement
-                var spawnPos = spawnSettlement.GatePosition;
-                party.InitializeMobilePartyAtPosition(clan.BasicTroop, new Vec2(spawnPos.X, spawnPos.Y));
+                // Set party position
+                party.Position2D = new Vec2(spawnPos.X, spawnPos.Y);
 
-                // Add initial troops (give player a small starting force)
-                party.MemberRoster.AddToCounts(clan.BasicTroop, 5);
-                party.MemberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
-
-                // Set party properties
-                party.SetPartyUsedByQuest(false);
+                // Add initial troops
+                if (clan.BasicTroop != null)
+                {
+                    party.MemberRoster.AddToCounts(clan.BasicTroop, 5);
+                }
+                if (clan.Culture?.EliteBasicTroop != null)
+                {
+                    party.MemberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
+                }
 
                 BannerBrosModule.LogMessage($"Party created at {spawnPos.X}, {spawnPos.Y} with {party.MemberRoster.TotalManCount} troops");
             }
@@ -452,16 +472,7 @@ public class SessionManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"CreatePlayerParty error: {ex.Message}");
-
-            // Fallback: try simpler approach
-            try
-            {
-                return hero.PartyBelongedTo;
-            }
-            catch
-            {
-                return null;
-            }
+            return hero.PartyBelongedTo;
         }
     }
 
@@ -469,53 +480,13 @@ public class SessionManager
     {
         try
         {
-            // Generate unique clan ID
-            var clanId = $"coop_clan_{playerName.ToLowerInvariant().Replace(" ", "_")}_{_nextPlayerId}";
-
-            // Create clan using Bannerlord's API
-            var clanName = new TaleWorlds.Localization.TextObject($"{playerName}'s Company");
-
-            // Try to create a new clan - approach varies by Bannerlord version
-            Clan? newClan = null;
-
-            try
-            {
-                // Modern Bannerlord (1.1+) approach
-                newClan = Clan.CreateClan(clanId);
-
-                if (newClan != null)
-                {
-                    newClan.InitializeClan(
-                        clanName,
-                        clanName,
-                        culture,
-                        Banner.CreateRandomClanBanner()
-                    );
-
-                    // Set clan properties
-                    newClan.UpdateHomeSettlement(
-                        Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown && s.Culture == culture) ??
-                        Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown)
-                    );
-
-                    // Give some starting gold
-                    newClan.AddRenown(50);
-
-                    BannerBrosModule.LogMessage($"Created new clan: {newClan.Name}");
-                    return newClan;
-                }
-            }
-            catch (Exception ex)
-            {
-                BannerBrosModule.LogMessage($"Clan.CreateClan failed: {ex.Message}, trying fallback");
-            }
-
-            // Fallback: Try to find and use an unused minor faction
+            // First, try to find an unused minor faction of matching culture
+            // This is the safest approach as it uses existing game objects
             var minorClan = Clan.All.FirstOrDefault(c =>
                 c.Culture == culture &&
                 !c.IsEliminated &&
                 c.IsMinorFaction &&
-                c.Heroes.Count == 0); // Prefer clans with no heroes
+                (c.Heroes.Count == 0 || c.Leader == null)); // Prefer clans with no active heroes
 
             if (minorClan != null)
             {
@@ -523,7 +494,7 @@ public class SessionManager
                 return minorClan;
             }
 
-            // Last fallback: use any minor clan of matching culture
+            // Try any minor clan of matching culture
             minorClan = Clan.All.FirstOrDefault(c =>
                 c.Culture == culture &&
                 !c.IsEliminated &&
@@ -533,6 +504,37 @@ public class SessionManager
             {
                 BannerBrosModule.LogMessage($"Assigned player to minor clan: {minorClan.Name}");
                 return minorClan;
+            }
+
+            // Try any non-eliminated minor clan
+            minorClan = Clan.All.FirstOrDefault(c =>
+                !c.IsEliminated &&
+                c.IsMinorFaction);
+
+            if (minorClan != null)
+            {
+                BannerBrosModule.LogMessage($"Using minor clan (different culture): {minorClan.Name}");
+                return minorClan;
+            }
+
+            // Last resort: try to create a new clan using available API
+            try
+            {
+                var clanId = $"coop_clan_{playerName.ToLowerInvariant().Replace(" ", "_")}_{_nextPlayerId}";
+                var newClan = Clan.CreateClan(clanId);
+
+                if (newClan != null)
+                {
+                    // Set basic properties directly
+                    newClan.Culture = culture;
+                    newClan.AddRenown(50);
+                    BannerBrosModule.LogMessage($"Created new clan: {clanId}");
+                    return newClan;
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Clan creation failed: {ex.Message}");
             }
 
             BannerBrosModule.LogMessage("Warning: Could not create or find suitable clan");
