@@ -24,11 +24,18 @@ public class PlayerProtectionBehavior : CampaignBehaviorBase
 
     private void OnTick(float dt)
     {
-        var module = BannerBrosModule.Instance;
-        if (module?.IsConnected != true) return;
+        try
+        {
+            var module = BannerBrosModule.Instance;
+            if (module?.IsConnected != true) return;
 
-        UpdateProtectionStates();
-        EnforceProtection();
+            UpdateProtectionStates();
+            EnforceProtection();
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"PlayerProtection OnTick error: {ex.Message}");
+        }
     }
 
     private void UpdateProtectionStates()

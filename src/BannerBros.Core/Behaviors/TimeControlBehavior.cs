@@ -22,17 +22,24 @@ public class TimeControlBehavior : CampaignBehaviorBase
 
     private void OnTick(float dt)
     {
-        var module = BannerBrosModule.Instance;
-        if (module?.IsConnected != true) return;
+        try
+        {
+            var module = BannerBrosModule.Instance;
+            if (module?.IsConnected != true) return;
 
-        if (Campaign.Current == null) return;
+            if (Campaign.Current == null) return;
 
-        // Get host's configured time multiplier
-        _hostTimeMultiplier = module.Config.TimeSpeedMultiplier;
-        _hostTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, _hostTimeMultiplier));
+            // Get host's configured time multiplier
+            _hostTimeMultiplier = module.Config.TimeSpeedMultiplier;
+            _hostTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, _hostTimeMultiplier));
 
-        // Force time to always run at constant rate
-        ForceConstantTimeFlow();
+            // Force time to always run at constant rate
+            ForceConstantTimeFlow();
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"TimeControl OnTick error: {ex.Message}");
+        }
     }
 
     private void ForceConstantTimeFlow()

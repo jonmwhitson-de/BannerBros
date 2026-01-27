@@ -69,47 +69,54 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
     private void OnTick(float dt)
     {
-        var module = BannerBrosModule.Instance;
-        if (module?.IsConnected != true) return;
-
-        // Wait for campaign to be fully ready before syncing
-        if (!_campaignReady)
+        try
         {
-            _readyCheckTimer += dt;
-            // Check every 0.5 seconds to avoid spam, start checking after 1 second
-            if (_readyCheckTimer >= 1.0f && (_readyCheckTimer - 1.0f) % 0.5f < dt)
-            {
-                if (IsCampaignReady())
-                {
-                    _campaignReady = true;
-                    BannerBrosModule.LogMessage("Campaign ready - starting co-op sync");
+            var module = BannerBrosModule.Instance;
+            if (module?.IsConnected != true) return;
 
-                    // Link host player to main hero now that campaign is ready
-                    if (module.IsHost)
+            // Wait for campaign to be fully ready before syncing
+            if (!_campaignReady)
+            {
+                _readyCheckTimer += dt;
+                // Check every 0.5 seconds to avoid spam, start checking after 1 second
+                if (_readyCheckTimer >= 1.0f && (_readyCheckTimer - 1.0f) % 0.5f < dt)
+                {
+                    if (IsCampaignReady())
                     {
-                        LinkHostToMainHero();
+                        _campaignReady = true;
+                        BannerBrosModule.LogMessage("Campaign ready - starting co-op sync");
+
+                        // Link host player to main hero now that campaign is ready
+                        if (module.IsHost)
+                        {
+                            LinkHostToMainHero();
+                        }
                     }
                 }
+                return;
             }
-            return;
+
+            // Accumulate time
+            _syncTimer += dt;
+            _worldSyncTimer += dt;
+
+            // Sync player states at fixed interval
+            if (_syncTimer >= SyncInterval)
+            {
+                _syncTimer = 0;
+                SyncLocalPlayerState();
+            }
+
+            // Host syncs world state less frequently
+            if (module.IsHost && _worldSyncTimer >= WorldSyncInterval)
+            {
+                _worldSyncTimer = 0;
+                SyncWorldState();
+            }
         }
-
-        // Accumulate time
-        _syncTimer += dt;
-        _worldSyncTimer += dt;
-
-        // Sync player states at fixed interval
-        if (_syncTimer >= SyncInterval)
+        catch (Exception ex)
         {
-            _syncTimer = 0;
-            SyncLocalPlayerState();
-        }
-
-        // Host syncs world state less frequently
-        if (module.IsHost && _worldSyncTimer >= WorldSyncInterval)
-        {
-            _worldSyncTimer = 0;
-            SyncWorldState();
+            BannerBrosModule.LogMessage($"OnTick error: {ex.Message}");
         }
     }
 
@@ -178,8 +185,15 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         var module = BannerBrosModule.Instance;
         if (module?.IsHost != true) return;
 
-        // Host broadcasts comprehensive world state update
-        BroadcastFullWorldSync();
+        try
+        {
+            // Host broadcasts comprehensive world state update
+            BroadcastFullWorldSync();
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"OnHourlyTick error: {ex.Message}");
+        }
     }
 
     private void OnDailyTick()

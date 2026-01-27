@@ -26,30 +26,37 @@ public class BattleJoinBehavior : CampaignBehaviorBase
 
     private void OnTick(float dt)
     {
-        var module = BannerBrosModule.Instance;
-        if (module?.IsConnected != true) return;
-
-        _promptCooldown = Math.Max(0, _promptCooldown - dt);
-
-        var localPlayer = module.PlayerManager.GetLocalPlayer();
-        if (localPlayer == null || localPlayer.State != PlayerState.OnMap) return;
-
-        // Check if near any active battle
-        var nearbyBattle = module.WorldStateManager.FindBattleAtPosition(
-            localPlayer.MapPositionX,
-            localPlayer.MapPositionY,
-            BATTLE_JOIN_RADIUS
-        );
-
-        if (nearbyBattle != _nearbyBattle)
+        try
         {
-            _nearbyBattle = nearbyBattle;
+            var module = BannerBrosModule.Instance;
+            if (module?.IsConnected != true) return;
 
-            if (_nearbyBattle != null && _promptCooldown <= 0)
+            _promptCooldown = Math.Max(0, _promptCooldown - dt);
+
+            var localPlayer = module.PlayerManager.GetLocalPlayer();
+            if (localPlayer == null || localPlayer.State != PlayerState.OnMap) return;
+
+            // Check if near any active battle
+            var nearbyBattle = module.WorldStateManager.FindBattleAtPosition(
+                localPlayer.MapPositionX,
+                localPlayer.MapPositionY,
+                BATTLE_JOIN_RADIUS
+            );
+
+            if (nearbyBattle != _nearbyBattle)
             {
-                _promptCooldown = 5.0f; // Don't spam the message
-                ShowBattleJoinPrompt(_nearbyBattle);
+                _nearbyBattle = nearbyBattle;
+
+                if (_nearbyBattle != null && _promptCooldown <= 0)
+                {
+                    _promptCooldown = 5.0f; // Don't spam the message
+                    ShowBattleJoinPrompt(_nearbyBattle);
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"BattleJoin OnTick error: {ex.Message}");
         }
     }
 

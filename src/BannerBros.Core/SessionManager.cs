@@ -440,7 +440,7 @@ public class SessionManager
             BannerBrosModule.LogMessage($"Warning: Failed to send state sync: {syncEx.Message}");
         }
 
-        BannerBrosModule.LogMessage($"Join processing complete for {packet.PlayerName}");
+        BannerBrosModule.LogMessage($"Join processing complete for {packet.PlayerName} (Player count: {_playerManager.PlayerCount})");
     }
 
     private string GetHeroName(string heroId)
