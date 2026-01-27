@@ -33,6 +33,7 @@ public class NetworkManager : INetEventListener
 
     public event Action<int>? PeerConnected;
     public event Action<int, DisconnectReason>? PeerDisconnected;
+    public event Action<string>? ConnectionRejected;
 
     private NetworkManager()
     {
@@ -214,10 +215,31 @@ public class NetworkManager : INetEventListener
             LiteNetLib.DisconnectReason.ConnectionFailed => DisconnectReason.ConnectionFailed,
             LiteNetLib.DisconnectReason.Timeout => DisconnectReason.Timeout,
             LiteNetLib.DisconnectReason.RemoteConnectionClose => DisconnectReason.Kicked,
+            LiteNetLib.DisconnectReason.ConnectionRejected => DisconnectReason.Rejected,
+            LiteNetLib.DisconnectReason.InvalidProtocol => DisconnectReason.VersionMismatch,
             _ => DisconnectReason.Unknown
         };
 
         Console.WriteLine($"[BannerBros.Network] Peer {peerId} disconnected: {disconnectInfo.Reason}");
+
+        // For clients, provide feedback on connection rejection
+        if (!_isHost && reason == DisconnectReason.Rejected)
+        {
+            ConnectionRejected?.Invoke("Connection rejected - server may be full or version mismatch");
+        }
+        else if (!_isHost && reason == DisconnectReason.VersionMismatch)
+        {
+            ConnectionRejected?.Invoke("Version mismatch - please update your mod");
+        }
+        else if (!_isHost && reason == DisconnectReason.ConnectionFailed)
+        {
+            ConnectionRejected?.Invoke("Could not connect to server - check address and port");
+        }
+        else if (!_isHost && reason == DisconnectReason.Timeout)
+        {
+            ConnectionRejected?.Invoke("Connection timed out - server may be unreachable");
+        }
+
         PeerDisconnected?.Invoke(peerId, reason);
     }
 
@@ -260,5 +282,7 @@ public enum DisconnectReason
     ConnectionFailed,
     Timeout,
     Kicked,
-    ServerClosed
+    ServerClosed,
+    Rejected,
+    VersionMismatch
 }
