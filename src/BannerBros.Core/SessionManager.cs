@@ -95,6 +95,9 @@ public class SessionManager
     {
         try
         {
+            // Reset player ID counter for new session
+            _nextPlayerId = 1;
+
             BannerBrosModule.LogMessage("StartHostSession: Setting state to InSession");
             SetState(SessionState.InSession);
 

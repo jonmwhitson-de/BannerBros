@@ -201,6 +201,9 @@ public class BannerBrosModule : MBSubModuleBase
             LogMessage("HostSession: Setting IsHost = true");
             IsHost = true;
 
+            // Clear any existing players from previous sessions
+            PlayerManager.Clear();
+
             LogMessage("HostSession: Starting network host...");
             if (NetworkManager.Instance == null)
             {
