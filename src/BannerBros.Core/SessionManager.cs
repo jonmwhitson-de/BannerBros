@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using Newtonsoft.Json;
 using TaleWorlds.CampaignSystem;
@@ -13,6 +14,31 @@ using TaleWorlds.ObjectSystem;
 using BannerBros.Network;
 
 namespace BannerBros.Core;
+
+/// <summary>
+/// Debug file logger that writes immediately to disk (survives crashes).
+/// </summary>
+public static class DebugFileLog
+{
+    private static readonly string LogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        "Mount and Blade II Bannerlord", "Configs", "BannerBros_Debug.log");
+
+    public static void Log(string message)
+    {
+        try
+        {
+            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
+            File.AppendAllText(LogPath, line);
+        }
+        catch { }
+    }
+
+    public static void Clear()
+    {
+        try { File.Delete(LogPath); } catch { }
+    }
+}
 
 /// <summary>
 /// Manages multiplayer session state including join flow, player spawning,
@@ -340,7 +366,11 @@ public class SessionManager
         };
 
         // DEBUG FLAG: Set to true to skip hero/party creation and test join without it
-        const bool SKIP_HERO_CREATION_FOR_DEBUG = true;
+        const bool SKIP_HERO_CREATION_FOR_DEBUG = false;
+
+        // Clear debug log at start of join
+        DebugFileLog.Clear();
+        DebugFileLog.Log($"=== JOIN STARTED for {packet.PlayerName} ===");
 
         // Handle the different cases:
         if (exportedCharacter != null && !SKIP_HERO_CREATION_FOR_DEBUG)
@@ -450,7 +480,10 @@ public class SessionManager
             BannerBrosModule.LogMessage($"Warning: Failed to send state sync: {syncEx.Message}");
         }
 
+        DebugFileLog.Log("Join processing: All steps complete");
         BannerBrosModule.LogMessage($"Join processing complete for {packet.PlayerName} (Player count: {_playerManager.PlayerCount})");
+        DebugFileLog.Log("Join processing: Message logged, returning from method");
+        DebugFileLog.Log("=== JOIN PROCESSING RETURNED ===");
     }
 
     private string GetHeroName(string heroId)
@@ -756,30 +789,38 @@ public class SessionManager
     /// </summary>
     private SpawnResult SpawnHeroFromExportedCharacter(ExportedCharacter exportedChar, CoopPlayer player)
     {
+        DebugFileLog.Log("SpawnHeroFromExportedCharacter: START");
+
         if (Campaign.Current == null)
         {
+            DebugFileLog.Log("SpawnHeroFromExportedCharacter: No active campaign");
             return new SpawnResult { Success = false, ErrorMessage = "No active campaign" };
         }
 
         try
         {
+            DebugFileLog.Log($"Step 1: Creating hero from exported character: {exportedChar.Name}");
             BannerBrosModule.LogMessage($"Creating hero from exported character: {exportedChar.Name}");
 
             // Get the culture
+            DebugFileLog.Log($"Step 2: Getting culture {exportedChar.CultureId}");
             var culture = MBObjectManager.Instance.GetObject<CultureObject>(exportedChar.CultureId);
             if (culture == null)
             {
                 culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
                     .FirstOrDefault(c => c.IsMainCulture);
-                BannerBrosModule.LogMessage($"Culture '{exportedChar.CultureId}' not found, using default: {culture?.StringId}");
+                DebugFileLog.Log($"Step 2b: Culture not found, using default: {culture?.StringId}");
             }
 
             if (culture == null)
             {
+                DebugFileLog.Log("Step 2: FAILED - No valid culture");
                 return new SpawnResult { Success = false, ErrorMessage = "No valid culture found" };
             }
+            DebugFileLog.Log($"Step 2: SUCCESS - Culture: {culture.StringId}");
 
-            // Find a spawn settlement - prefer a town of matching culture
+            // Find a spawn settlement
+            DebugFileLog.Log("Step 3: Finding spawn settlement");
             var spawnSettlement = Campaign.Current.Settlements
                 .Where(s => s.IsTown && s.Culture == culture)
                 .FirstOrDefault() ??
@@ -787,17 +828,23 @@ public class SessionManager
 
             if (spawnSettlement == null)
             {
+                DebugFileLog.Log("Step 3: FAILED - No spawn location");
                 return new SpawnResult { Success = false, ErrorMessage = "No valid spawn location found" };
             }
+            DebugFileLog.Log($"Step 3: SUCCESS - Settlement: {spawnSettlement.Name}");
 
-            // Create a clan for this player
+            // Create a clan
+            DebugFileLog.Log("Step 4: Creating clan");
             var clan = CreatePlayerClan(culture, exportedChar.Name);
             if (clan == null)
             {
+                DebugFileLog.Log("Step 4: FAILED - Clan creation failed");
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create clan" };
             }
+            DebugFileLog.Log($"Step 4: SUCCESS - Clan: {clan.StringId}");
 
-            // Create the hero using HeroCreator
+            // Create the hero
+            DebugFileLog.Log("Step 5: Creating hero via HeroCreator.CreateSpecialHero");
             var characterTemplate = culture.BasicTroop;
             var hero = HeroCreator.CreateSpecialHero(
                 characterTemplate,
@@ -809,80 +856,102 @@ public class SessionManager
 
             if (hero == null)
             {
+                DebugFileLog.Log("Step 5: FAILED - Hero is null");
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create hero" };
             }
+            DebugFileLog.Log($"Step 5: SUCCESS - Hero: {hero.StringId}");
 
             // Set hero name
+            DebugFileLog.Log("Step 6: Setting hero name");
             hero.SetName(new TaleWorlds.Localization.TextObject(exportedChar.Name),
                          new TaleWorlds.Localization.TextObject(exportedChar.Name));
+            DebugFileLog.Log("Step 6: SUCCESS");
 
             // Set gender
+            DebugFileLog.Log("Step 7: Setting gender");
             try
             {
-                // Use reflection to set IsFemale if needed
                 if (hero.IsFemale != exportedChar.IsFemale)
                 {
                     var isFemaleField = typeof(Hero).GetField("_isFemale",
                         BindingFlags.NonPublic | BindingFlags.Instance);
                     isFemaleField?.SetValue(hero, exportedChar.IsFemale);
                 }
+                DebugFileLog.Log("Step 7: SUCCESS");
             }
             catch (Exception ex)
             {
-                BannerBrosModule.LogMessage($"Failed to set gender: {ex.Message}");
+                DebugFileLog.Log($"Step 7: FAILED (non-fatal) - {ex.Message}");
             }
 
-            // Apply BodyProperties (appearance)
+            // Apply BodyProperties
+            DebugFileLog.Log("Step 8: Applying BodyProperties");
             ApplyBodyProperties(hero, exportedChar.BodyPropertiesXml);
+            DebugFileLog.Log("Step 8: SUCCESS");
 
             // Apply attributes
+            DebugFileLog.Log("Step 9: Applying attributes");
             ApplyAttributes(hero, exportedChar.Attributes);
+            DebugFileLog.Log("Step 9: SUCCESS");
 
             // Apply skills and focus points
+            DebugFileLog.Log("Step 10: Applying skills and focus");
             ApplySkillsAndFocus(hero, exportedChar.Skills, exportedChar.FocusPoints);
+            DebugFileLog.Log("Step 10: SUCCESS");
 
             // Apply traits
+            DebugFileLog.Log("Step 11: Applying traits");
             ApplyTraits(hero, exportedChar.Traits);
+            DebugFileLog.Log("Step 11: SUCCESS");
 
             // Apply equipment
+            DebugFileLog.Log("Step 12: Applying equipment");
             ApplyEquipment(hero, exportedChar.EquipmentIds);
+            DebugFileLog.Log("Step 12: SUCCESS");
 
             // Set gold
+            DebugFileLog.Log("Step 13: Setting gold");
             try
             {
                 hero.ChangeHeroGold(exportedChar.Gold - hero.Gold);
+                DebugFileLog.Log("Step 13: SUCCESS");
             }
             catch (Exception ex)
             {
-                BannerBrosModule.LogMessage($"Failed to set gold: {ex.Message}");
+                DebugFileLog.Log($"Step 13: FAILED (non-fatal) - {ex.Message}");
             }
 
-            // Make this hero the clan leader
+            // Make clan leader
+            DebugFileLog.Log("Step 14: Setting clan leader");
             if (clan.Leader != hero)
             {
                 clan.SetLeader(hero);
             }
+            DebugFileLog.Log("Step 14: SUCCESS");
 
-            // Get spawn position from settlement
+            // Get spawn position
+            DebugFileLog.Log("Step 15: Getting spawn position");
             var spawnPos = spawnSettlement.GatePosition;
             var spawnX = spawnPos.X;
             var spawnY = spawnPos.Y;
+            DebugFileLog.Log($"Step 15: SUCCESS - Position: {spawnX}, {spawnY}");
 
-            // Create mobile party for the hero
+            // Create party
+            DebugFileLog.Log("Step 16: Creating party");
             MobileParty? party = CreatePlayerParty(hero, clan, spawnSettlement);
 
             if (party == null)
             {
+                DebugFileLog.Log("Step 16: WARNING - Party is null");
                 BannerBrosModule.LogMessage("Warning: Party creation returned null, hero may not appear on map");
             }
             else
             {
-                BannerBrosModule.LogMessage($"Created party {party.StringId} for player {exportedChar.Name}");
+                DebugFileLog.Log($"Step 16: SUCCESS - Party: {party.StringId}");
             }
 
-            BannerBrosModule.LogMessage($"Successfully created hero {hero.Name} from exported character data");
-
-            return new SpawnResult
+            DebugFileLog.Log("Step 17: Building result");
+            var result = new SpawnResult
             {
                 Success = true,
                 HeroId = hero.StringId,
@@ -891,9 +960,16 @@ public class SessionManager
                 SpawnX = spawnX,
                 SpawnY = spawnY
             };
+
+            DebugFileLog.Log("SpawnHeroFromExportedCharacter: COMPLETE SUCCESS");
+            BannerBrosModule.LogMessage($"Successfully created hero {hero.Name} from exported character data");
+
+            return result;
         }
         catch (Exception ex)
         {
+            DebugFileLog.Log($"SpawnHeroFromExportedCharacter: EXCEPTION - {ex.Message}");
+            DebugFileLog.Log($"Stack: {ex.StackTrace}");
             BannerBrosModule.LogMessage($"SpawnHeroFromExportedCharacter error: {ex}");
             return new SpawnResult { Success = false, ErrorMessage = ex.Message };
         }
