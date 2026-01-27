@@ -152,56 +152,64 @@ public class SessionManager
         var networkManager = NetworkManager.Instance;
         if (networkManager == null || !networkManager.IsHost) return;
 
-        BannerBrosModule.LogMessage($"Processing join request from {packet.PlayerName}");
-
-        // Validate version
-        if (packet.ModVersion != ModVersion)
+        try
         {
-            SendJoinResponse(peerId, false, $"Version mismatch. Host: {ModVersion}, Client: {packet.ModVersion}");
-            return;
+            BannerBrosModule.LogMessage($"Processing join request from {packet.PlayerName}");
+
+            // Validate version
+            if (packet.ModVersion != ModVersion)
+            {
+                SendJoinResponse(peerId, false, $"Version mismatch. Host: {ModVersion}, Client: {packet.ModVersion}");
+                return;
+            }
+
+            // Check player limit
+            if (_playerManager.PlayerCount >= (BannerBrosModule.Instance?.Config.MaxPlayers ?? 4))
+            {
+                SendJoinResponse(peerId, false, "Server is full");
+                return;
+            }
+
+            // Assign player ID
+            var playerId = _nextPlayerId++;
+
+            // Check if this is a returning player with existing character
+            bool requiresCharacterCreation = !packet.HasExistingCharacter;
+
+            // Build response with current world state
+            var response = new JoinResponsePacket
+            {
+                Accepted = true,
+                AssignedPlayerId = playerId,
+                RequiresCharacterCreation = requiresCharacterCreation,
+                ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
+            };
+
+            // Send response
+            networkManager.SendTo(peerId, response);
+
+            // Create player entry (not fully initialized until character is created/loaded)
+            var player = new CoopPlayer
+            {
+                NetworkId = playerId,
+                Name = packet.PlayerName,
+                IsHost = false,
+                State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
+            };
+
+            _playerManager.AddPlayer(player);
+
+            // Notify other players
+            BroadcastPlayerJoined(player);
+
+            // Send full state sync
+            SendFullStateSync(peerId);
         }
-
-        // Check player limit
-        if (_playerManager.PlayerCount >= (BannerBrosModule.Instance?.Config.MaxPlayers ?? 4))
+        catch (Exception ex)
         {
-            SendJoinResponse(peerId, false, "Server is full");
-            return;
+            BannerBrosModule.LogMessage($"HandleJoinRequest error: {ex.Message}");
+            SendJoinResponse(peerId, false, "Server error processing join request");
         }
-
-        // Assign player ID
-        var playerId = _nextPlayerId++;
-
-        // Check if this is a returning player with existing character
-        bool requiresCharacterCreation = !packet.HasExistingCharacter;
-
-        // Build response with current world state
-        var response = new JoinResponsePacket
-        {
-            Accepted = true,
-            AssignedPlayerId = playerId,
-            RequiresCharacterCreation = requiresCharacterCreation,
-            ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
-        };
-
-        // Send response
-        networkManager.SendTo(peerId, response);
-
-        // Create player entry (not fully initialized until character is created/loaded)
-        var player = new CoopPlayer
-        {
-            NetworkId = playerId,
-            Name = packet.PlayerName,
-            IsHost = false,
-            State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
-        };
-
-        _playerManager.AddPlayer(player);
-
-        // Notify other players
-        BroadcastPlayerJoined(player);
-
-        // Send full state sync
-        SendFullStateSync(peerId);
     }
 
     private void SendJoinResponse(int peerId, bool accepted, string? rejectionReason = null)
@@ -239,32 +247,53 @@ public class SessionManager
 
     private void SendFullStateSync(int peerId)
     {
-        var playerStates = new List<PlayerStatePacket>();
-        foreach (var player in _playerManager.Players.Values)
+        try
         {
-            playerStates.Add(CreatePlayerStatePacket(player));
-        }
-
-        var activeBattles = new List<BattleInfo>();
-        foreach (var battle in _worldStateManager.ActiveBattles.Values)
-        {
-            activeBattles.Add(new BattleInfo
+            var playerStates = new List<PlayerStatePacket>();
+            foreach (var player in _playerManager.Players.Values)
             {
-                BattleId = battle.BattleId,
-                MapPosition = battle.MapPosition,
-                InitiatorPlayerId = battle.InitiatorPlayerId
-            });
+                playerStates.Add(CreatePlayerStatePacket(player));
+            }
+
+            var activeBattles = new List<BattleInfo>();
+            foreach (var battle in _worldStateManager.ActiveBattles.Values)
+            {
+                activeBattles.Add(new BattleInfo
+                {
+                    BattleId = battle.BattleId,
+                    MapPosition = battle.MapPosition,
+                    InitiatorPlayerId = battle.InitiatorPlayerId
+                });
+            }
+
+            // Safely get campaign time - may not exist if joining before campaign starts
+            long campaignTimeTicks = 0;
+            try
+            {
+                if (Campaign.Current != null)
+                {
+                    campaignTimeTicks = (long)(CampaignTime.Now.ToHours * 1000);
+                }
+            }
+            catch
+            {
+                // Campaign time not available yet
+            }
+
+            var packet = new FullStateSyncPacket
+            {
+                CampaignTimeTicks = campaignTimeTicks,
+                TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f,
+                PlayerStatesJson = JsonConvert.SerializeObject(playerStates),
+                ActiveBattlesJson = JsonConvert.SerializeObject(activeBattles)
+            };
+
+            NetworkManager.Instance?.SendTo(peerId, packet);
         }
-
-        var packet = new FullStateSyncPacket
+        catch (Exception ex)
         {
-            CampaignTimeTicks = (long)(CampaignTime.Now.ToHours * 1000), // Convert to milliseconds for precision
-            TimeMultiplier = BannerBrosModule.Instance?.Config.TimeSpeedMultiplier ?? 1.0f,
-            PlayerStatesJson = JsonConvert.SerializeObject(playerStates),
-            ActiveBattlesJson = JsonConvert.SerializeObject(activeBattles)
-        };
-
-        NetworkManager.Instance?.SendTo(peerId, packet);
+            BannerBrosModule.LogMessage($"SendFullStateSync error: {ex.Message}");
+        }
     }
 
     private void HandleCharacterCreation(CharacterCreationPacket packet, int peerId)
