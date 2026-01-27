@@ -342,51 +342,105 @@ public class SessionManager
         // Handle the different cases:
         if (exportedCharacter != null)
         {
-            // Client sent full character data - create hero from it
-            BannerBrosModule.LogMessage($"Creating hero from exported character data...");
-            var result = SpawnHeroFromExportedCharacter(exportedCharacter, player);
-
-            if (result.Success)
+            try
             {
-                player.HeroId = result.HeroId;
-                player.ClanId = result.ClanId;
-                player.PartyId = result.PartyId;
-                player.MapPositionX = result.SpawnX;
-                player.MapPositionY = result.SpawnY;
-                player.State = PlayerState.OnMap;
+                // Client sent full character data - create hero from it
+                BannerBrosModule.LogMessage($"Creating hero from exported character data...");
+                var result = SpawnHeroFromExportedCharacter(exportedCharacter, player);
 
-                // Register for future reconnection
-                BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
-                    player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
+                if (result.Success)
+                {
+                    player.HeroId = result.HeroId;
+                    player.ClanId = result.ClanId;
+                    player.PartyId = result.PartyId;
+                    player.MapPositionX = result.SpawnX;
+                    player.MapPositionY = result.SpawnY;
+                    player.State = PlayerState.OnMap;
 
-                // Send success response
-                SendCharacterCreationResponse(peerId, playerId, true, null,
-                    result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+                    // Register for future reconnection
+                    try
+                    {
+                        BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
+                            player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
+                    }
+                    catch (Exception regEx)
+                    {
+                        BannerBrosModule.LogMessage($"Warning: Failed to register player: {regEx.Message}");
+                    }
+
+                    // Send success response
+                    try
+                    {
+                        SendCharacterCreationResponse(peerId, playerId, true, null,
+                            result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+                    }
+                    catch (Exception respEx)
+                    {
+                        BannerBrosModule.LogMessage($"Warning: Failed to send creation response: {respEx.Message}");
+                    }
+                }
+                else
+                {
+                    BannerBrosModule.LogMessage($"Failed to create hero: {result.ErrorMessage}");
+                    // Fall back to requiring character creation
+                    player.State = PlayerState.InMenu;
+                }
             }
-            else
+            catch (Exception heroEx)
             {
-                BannerBrosModule.LogMessage($"Failed to create hero: {result.ErrorMessage}");
-                // Fall back to requiring character creation
+                BannerBrosModule.LogMessage($"ERROR creating hero: {heroEx.Message}");
+                BannerBrosModule.LogMessage($"Stack: {heroEx.StackTrace}");
                 player.State = PlayerState.InMenu;
             }
         }
         else if (hasValidSavedCharacter && savedCharacter != null)
         {
-            // Reclaiming saved character
-            player.HeroId = savedCharacter.HeroId;
-            player.ClanId = savedCharacter.ClanId;
-            player.PartyId = savedCharacter.PartyId;
-            player.State = PlayerState.OnMap;
-            UpdatePlayerPositionFromHero(player);
+            try
+            {
+                // Reclaiming saved character
+                player.HeroId = savedCharacter.HeroId;
+                player.ClanId = savedCharacter.ClanId;
+                player.PartyId = savedCharacter.PartyId;
+                player.State = PlayerState.OnMap;
+                UpdatePlayerPositionFromHero(player);
+            }
+            catch (Exception savedEx)
+            {
+                BannerBrosModule.LogMessage($"ERROR reclaiming saved character: {savedEx.Message}");
+                player.State = PlayerState.InMenu;
+            }
         }
 
-        _playerManager.AddPlayer(player);
+        try
+        {
+            _playerManager.AddPlayer(player);
+        }
+        catch (Exception addEx)
+        {
+            BannerBrosModule.LogMessage($"ERROR adding player: {addEx.Message}");
+        }
 
         // Notify other players
-        BroadcastPlayerJoined(player);
+        try
+        {
+            BroadcastPlayerJoined(player);
+        }
+        catch (Exception broadcastEx)
+        {
+            BannerBrosModule.LogMessage($"Warning: Failed to broadcast player joined: {broadcastEx.Message}");
+        }
 
         // Send full state sync
-        SendFullStateSync(peerId);
+        try
+        {
+            SendFullStateSync(peerId);
+        }
+        catch (Exception syncEx)
+        {
+            BannerBrosModule.LogMessage($"Warning: Failed to send state sync: {syncEx.Message}");
+        }
+
+        BannerBrosModule.LogMessage($"Join processing complete for {packet.PlayerName}");
     }
 
     private string GetHeroName(string heroId)
