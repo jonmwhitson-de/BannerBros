@@ -76,25 +76,22 @@ public static class CharacterCreationUI
 
     private static void ShowCultureSelection()
     {
-        // Get available cultures
-        var cultures = GetAvailableCultures();
-
-        if (cultures.Count == 0)
+        // Hardcoded culture list - client doesn't have campaign data loaded
+        // The server will validate the culture ID
+        var cultureData = new[]
         {
-            BannerBrosModule.LogMessage("No cultures available!");
-            return;
-        }
+            ("empire", "Empire", "Disciplined legions, crossbows, heavy cavalry"),
+            ("sturgia", "Sturgia", "Fierce axemen, skilled sailors, hardy warriors"),
+            ("aserai", "Aserai", "Swift cavalry, desert warriors, skilled merchants"),
+            ("vlandia", "Vlandia", "Heavy knights, crossbowmen, feudal lords"),
+            ("khuzait", "Khuzait", "Master horse archers, nomadic warriors"),
+            ("battania", "Battania", "Forest guerrillas, longbowmen, druids")
+        };
 
         var elements = new List<InquiryElement>();
-        foreach (var culture in cultures.Take(6)) // Limit to 6 for UI
+        foreach (var (id, name, desc) in cultureData)
         {
-            elements.Add(new InquiryElement(
-                culture.StringId,
-                culture.Name.ToString(),
-                null,
-                true,
-                GetCultureDescription(culture)
-            ));
+            elements.Add(new InquiryElement(id, name, null, true, desc));
         }
 
         var inquiry = new MultiSelectionInquiryData(
@@ -113,50 +110,6 @@ public static class CharacterCreationUI
         MBInformationManager.ShowMultiSelectionInquiry(inquiry, true);
     }
 
-    private static List<CultureObject> GetAvailableCultures()
-    {
-        var cultures = new List<CultureObject>();
-
-        if (Campaign.Current != null)
-        {
-            cultures = Campaign.Current.ObjectManager
-                .GetObjectTypeList<CultureObject>()
-                .Where(c => c.IsMainCulture && !c.IsBandit)
-                .ToList();
-        }
-
-        // Fallback to default cultures if campaign not available
-        if (cultures.Count == 0)
-        {
-            var defaultCultures = new[] { "empire", "sturgia", "aserai", "vlandia", "khuzait", "battania" };
-            foreach (var cultureId in defaultCultures)
-            {
-                var culture = MBObjectManager.Instance?.GetObject<CultureObject>(cultureId);
-                if (culture != null)
-                {
-                    cultures.Add(culture);
-                }
-            }
-        }
-
-        return cultures;
-    }
-
-    private static string GetCultureDescription(CultureObject culture)
-    {
-        // Provide brief descriptions for each culture
-        return culture.StringId switch
-        {
-            "empire" => "Disciplined legions, crossbows, heavy cavalry",
-            "sturgia" => "Fierce axemen, skilled sailors, hardy warriors",
-            "aserai" => "Swift cavalry, desert warriors, skilled merchants",
-            "vlandia" => "Heavy knights, crossbowmen, feudal lords",
-            "khuzait" => "Master horse archers, nomadic warriors",
-            "battania" => "Forest guerrillas, longbowmen, druids",
-            _ => culture.Name.ToString()
-        };
-    }
-
     private static void OnCultureSelected(List<InquiryElement> selected)
     {
         if (selected.Count == 0) return;
@@ -169,8 +122,17 @@ public static class CharacterCreationUI
 
     private static void ShowConfirmation()
     {
-        var culture = MBObjectManager.Instance?.GetObject<CultureObject>(_selectedCultureId);
-        var cultureName = culture?.Name.ToString() ?? _selectedCultureId;
+        // Use friendly name for confirmation (client may not have culture objects loaded)
+        var cultureName = _selectedCultureId switch
+        {
+            "empire" => "Empire",
+            "sturgia" => "Sturgia",
+            "aserai" => "Aserai",
+            "vlandia" => "Vlandia",
+            "khuzait" => "Khuzait",
+            "battania" => "Battania",
+            _ => _selectedCultureId
+        };
 
         var message = $"Create this character?\n\n" +
                       $"Name: {_characterName}\n" +
