@@ -937,7 +937,7 @@ public class SessionManager
             DebugFileLog.Log($"Step 15: SUCCESS - Position: {spawnX}, {spawnY}");
 
             // DEBUG: Set to true to skip party creation and test if hero alone causes crash
-            const bool SKIP_PARTY_CREATION_DEBUG = true;
+            const bool SKIP_PARTY_CREATION_DEBUG = false;
 
             MobileParty? party = null;
             if (!SKIP_PARTY_CREATION_DEBUG)
@@ -1289,6 +1289,63 @@ public class SessionManager
             if (party != null)
             {
                 BannerBrosModule.LogMessage($"Party created for {hero.Name} with {party.MemberRoster?.TotalManCount ?? 0} troops");
+                DebugFileLog.Log($"Party created: {party.StringId}, initializing AI and state...");
+
+                // CRITICAL: Initialize the party properly to prevent crash
+                try
+                {
+                    // Set party to not make decisions (we'll control it)
+                    if (party.Ai != null)
+                    {
+                        party.Ai.SetDoNotMakeNewDecisions(true);
+                        DebugFileLog.Log("Set AI to not make decisions");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugFileLog.Log($"Failed to set AI decisions: {ex.Message}");
+                }
+
+                try
+                {
+                    // Make party hold position
+                    party.SetMoveModeHold();
+                    DebugFileLog.Log("Set party to hold mode");
+                }
+                catch (Exception ex)
+                {
+                    DebugFileLog.Log($"Failed to set hold mode: {ex.Message}");
+                }
+
+                try
+                {
+                    // Ensure party is visible and active
+                    party.IsVisible = true;
+                    DebugFileLog.Log("Set party visible");
+                }
+                catch (Exception ex)
+                {
+                    DebugFileLog.Log($"Failed to set visibility: {ex.Message}");
+                }
+
+                try
+                {
+                    // Make sure party is in the campaign's party list
+                    if (!Campaign.Current.MobileParties.Contains(party))
+                    {
+                        DebugFileLog.Log("WARNING: Party not in Campaign.MobileParties!");
+                    }
+                    else
+                    {
+                        DebugFileLog.Log("Party is in Campaign.MobileParties");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugFileLog.Log($"Failed to check party list: {ex.Message}");
+                }
+
+                DebugFileLog.Log("Party initialization complete");
             }
             else
             {
