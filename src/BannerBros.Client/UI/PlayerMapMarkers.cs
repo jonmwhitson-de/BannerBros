@@ -204,7 +204,8 @@ public static class PlayerPartyVisuals
         if (module?.IsConnected != true) return party.Name.ToString();
 
         // Check if this party belongs to a co-op player
-        foreach (var player in module.PlayerManager.Players.Values)
+        // ToList() to avoid collection modified exception
+        foreach (var player in module.PlayerManager.Players.Values.ToList())
         {
             if (player.PartyId == party.StringId)
             {

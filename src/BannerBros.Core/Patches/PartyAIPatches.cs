@@ -22,13 +22,21 @@ public static class PartyAIPatches
         var module = BannerBrosModule.Instance;
         if (module?.IsConnected != true) return false;
 
-        // Check if this party belongs to any connected player who is protected
-        foreach (var player in module.PlayerManager.Players.Values)
+        try
         {
-            if (player.PartyId == party.StringId)
+            // Check if this party belongs to any connected player who is protected
+            // ToList() to avoid collection modified exception
+            foreach (var player in module.PlayerManager.Players.Values.ToList())
             {
-                return IsPlayerProtected(player);
+                if (player.PartyId == party.StringId)
+                {
+                    return IsPlayerProtected(player);
+                }
             }
+        }
+        catch
+        {
+            // Ignore errors during iteration - defensive for Harmony patches
         }
 
         return false;

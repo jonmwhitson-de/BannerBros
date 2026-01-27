@@ -29,7 +29,8 @@ public class PlayerHUDManager
 
         var localPlayerId = module.PlayerManager.LocalPlayerId;
 
-        foreach (var player in module.PlayerManager.Players.Values)
+        // ToList() to avoid collection modified exception
+        foreach (var player in module.PlayerManager.Players.Values.ToList())
         {
             // Don't show marker for local player
             if (player.NetworkId == localPlayerId) continue;
