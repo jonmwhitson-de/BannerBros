@@ -763,21 +763,37 @@ public class SessionManager
 
         try
         {
+            // Use reflection to handle CharacterAttributesEnum which may vary by version
+            var enumType = typeof(Hero).Assembly.GetType("TaleWorlds.CampaignSystem.CharacterDevelopment.CharacterAttributesEnum");
+            var getAttrMethod = hero.GetType().GetMethod("GetAttributeValue");
+            var addAttrMethod = hero.HeroDeveloper?.GetType().GetMethod("AddAttribute");
+
+            if (enumType == null || getAttrMethod == null)
+            {
+                BannerBrosModule.LogMessage("Could not find attribute methods via reflection");
+                return;
+            }
+
+            int appliedCount = 0;
             foreach (var attr in attributes)
             {
-                if (Enum.TryParse<CharacterAttributesEnum>(attr.Key, out var attrEnum))
+                try
                 {
-                    var currentValue = hero.GetAttributeValue(attrEnum);
-                    var diff = attr.Value - currentValue;
-
-                    if (diff != 0 && hero.HeroDeveloper != null)
+                    if (Enum.TryParse(enumType, attr.Key, out var attrEnum))
                     {
-                        // Add attribute points
-                        hero.HeroDeveloper.AddAttribute(attrEnum, diff, false);
+                        var currentValue = (int)(getAttrMethod.Invoke(hero, new[] { attrEnum }) ?? 0);
+                        var diff = attr.Value - currentValue;
+
+                        if (diff != 0 && addAttrMethod != null && hero.HeroDeveloper != null)
+                        {
+                            addAttrMethod.Invoke(hero.HeroDeveloper, new object[] { attrEnum, diff, false });
+                            appliedCount++;
+                        }
                     }
                 }
+                catch { }
             }
-            BannerBrosModule.LogMessage($"Applied {attributes.Count} attributes to hero");
+            BannerBrosModule.LogMessage($"Applied {appliedCount} attributes to hero");
         }
         catch (Exception ex)
         {
@@ -789,44 +805,64 @@ public class SessionManager
     {
         try
         {
+            // Get all skill objects from the game
+            var skillObjects = MBObjectManager.Instance?.GetObjectTypeList<SkillObject>();
+            if (skillObjects == null)
+            {
+                BannerBrosModule.LogMessage("Could not get skill objects");
+                return;
+            }
+
             // Apply skills
             if (skills != null && skills.Count > 0)
             {
+                int appliedCount = 0;
                 foreach (var skillEntry in skills)
                 {
-                    var skill = TaleWorlds.Core.Skills.All.FirstOrDefault(s => s.StringId == skillEntry.Key);
+                    var skill = skillObjects.FirstOrDefault(s => s.StringId == skillEntry.Key);
                     if (skill != null)
                     {
-                        var currentValue = hero.GetSkillValue(skill);
-                        var diff = skillEntry.Value - currentValue;
-
-                        if (diff > 0 && hero.HeroDeveloper != null)
+                        try
                         {
-                            hero.HeroDeveloper.ChangeSkillLevel(skill, diff, false);
+                            var currentValue = hero.GetSkillValue(skill);
+                            var diff = skillEntry.Value - currentValue;
+
+                            if (diff > 0 && hero.HeroDeveloper != null)
+                            {
+                                hero.HeroDeveloper.ChangeSkillLevel(skill, diff, false);
+                                appliedCount++;
+                            }
                         }
+                        catch { }
                     }
                 }
-                BannerBrosModule.LogMessage($"Applied {skills.Count} skills to hero");
+                BannerBrosModule.LogMessage($"Applied {appliedCount} skills to hero");
             }
 
             // Apply focus points
             if (focusPoints != null && focusPoints.Count > 0 && hero.HeroDeveloper != null)
             {
+                int appliedCount = 0;
                 foreach (var focusEntry in focusPoints)
                 {
-                    var skill = TaleWorlds.Core.Skills.All.FirstOrDefault(s => s.StringId == focusEntry.Key);
+                    var skill = skillObjects.FirstOrDefault(s => s.StringId == focusEntry.Key);
                     if (skill != null)
                     {
-                        var currentFocus = hero.HeroDeveloper.GetFocus(skill);
-                        var diff = focusEntry.Value - currentFocus;
-
-                        if (diff > 0)
+                        try
                         {
-                            hero.HeroDeveloper.AddFocus(skill, diff, false);
+                            var currentFocus = hero.HeroDeveloper.GetFocus(skill);
+                            var diff = focusEntry.Value - currentFocus;
+
+                            if (diff > 0)
+                            {
+                                hero.HeroDeveloper.AddFocus(skill, diff, false);
+                                appliedCount++;
+                            }
                         }
+                        catch { }
                     }
                 }
-                BannerBrosModule.LogMessage($"Applied {focusPoints.Count} focus points to hero");
+                BannerBrosModule.LogMessage($"Applied {appliedCount} focus points to hero");
             }
         }
         catch (Exception ex)
@@ -841,16 +877,30 @@ public class SessionManager
 
         try
         {
+            // Get all trait objects from the game
+            var traitObjects = MBObjectManager.Instance?.GetObjectTypeList<TraitObject>();
+            if (traitObjects == null)
+            {
+                BannerBrosModule.LogMessage("Could not get trait objects");
+                return;
+            }
+
+            int appliedCount = 0;
             foreach (var traitEntry in traits)
             {
-                var trait = DefaultTraits.Personality.FirstOrDefault(t => t.StringId == traitEntry.Key);
+                var trait = traitObjects.FirstOrDefault(t => t.StringId == traitEntry.Key);
                 if (trait != null)
                 {
-                    var currentLevel = hero.GetTraitLevel(trait);
-                    if (currentLevel != traitEntry.Value)
+                    try
                     {
-                        hero.SetTraitLevel(trait, traitEntry.Value);
+                        var currentLevel = hero.GetTraitLevel(trait);
+                        if (currentLevel != traitEntry.Value)
+                        {
+                            hero.SetTraitLevel(trait, traitEntry.Value);
+                            appliedCount++;
+                        }
                     }
+                    catch { }
                 }
             }
             BannerBrosModule.LogMessage($"Applied {traits.Count} traits to hero");
@@ -1091,9 +1141,31 @@ public class SessionManager
 
                     var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
 
-                    // Use settlement position
-                    var position = settlement.GetPosition2D;
-                    party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, position);
+                    // Initialize party position - try multiple approaches for API compatibility
+                    try
+                    {
+                        // Try InitializeMobilePartyAroundPosition (newer API)
+                        party.InitializeMobilePartyAroundPosition(settlement.Position2D, 1f);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            // Try using GatePosition
+                            var gatePos = settlement.GatePosition;
+                            var posVec2 = new Vec2(gatePos.X, gatePos.Y);
+                            party.Position2D = posVec2;
+                        }
+                        catch
+                        {
+                            // Last resort - use reflection
+                            var pos2d = settlement.GetPosition2D;
+                            party.Position2D = pos2d;
+                        }
+                    }
+
+                    party.MemberRoster.Add(memberRoster);
+                    party.PrisonRoster.Add(prisonerRoster);
                     party.ActualClan = clan;
 
                     BannerBrosModule.LogMessage("Created party via component");

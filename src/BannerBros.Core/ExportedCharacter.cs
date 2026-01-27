@@ -3,6 +3,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.ObjectSystem;
 
 namespace BannerBros.Core;
 
@@ -93,14 +94,34 @@ public class ExportedCharacter
             BannerBrosModule.LogMessage($"Failed to capture BodyProperties: {ex.Message}");
         }
 
-        // Capture attributes
+        // Capture attributes using reflection to handle different API versions
         try
         {
-            foreach (CharacterAttributesEnum attr in Enum.GetValues(typeof(CharacterAttributesEnum)))
+            // Try getting attributes via CharacterAttributes enum
+            var attrNames = new[] { "Vigor", "Control", "Endurance", "Cunning", "Social", "Intelligence" };
+            foreach (var attrName in attrNames)
             {
-                if (attr == CharacterAttributesEnum.End) continue;
-                exported.Attributes[attr.ToString()] = hero.GetAttributeValue(attr);
+                try
+                {
+                    // Use reflection to get attribute value
+                    var getAttrMethod = hero.GetType().GetMethod("GetAttributeValue");
+                    if (getAttrMethod != null)
+                    {
+                        // Try to find the enum type and value
+                        var enumType = typeof(Hero).Assembly.GetType("TaleWorlds.CampaignSystem.CharacterDevelopment.CharacterAttributesEnum");
+                        if (enumType != null && Enum.TryParse(enumType, attrName, out var attrEnum))
+                        {
+                            var value = getAttrMethod.Invoke(hero, new[] { attrEnum });
+                            if (value is int intValue)
+                            {
+                                exported.Attributes[attrName] = intValue;
+                            }
+                        }
+                    }
+                }
+                catch { }
             }
+            BannerBrosModule.LogMessage($"Captured {exported.Attributes.Count} attributes");
         }
         catch (Exception ex)
         {
@@ -110,11 +131,21 @@ public class ExportedCharacter
         // Capture skills and focus points
         try
         {
-            foreach (var skill in TaleWorlds.Core.Skills.All)
+            // Get all skill objects from the game
+            var skillObjects = MBObjectManager.Instance?.GetObjectTypeList<SkillObject>();
+            if (skillObjects != null)
             {
-                exported.Skills[skill.StringId] = hero.GetSkillValue(skill);
-                exported.FocusPoints[skill.StringId] = hero.HeroDeveloper?.GetFocus(skill) ?? 0;
+                foreach (var skill in skillObjects)
+                {
+                    try
+                    {
+                        exported.Skills[skill.StringId] = hero.GetSkillValue(skill);
+                        exported.FocusPoints[skill.StringId] = hero.HeroDeveloper?.GetFocus(skill) ?? 0;
+                    }
+                    catch { }
+                }
             }
+            BannerBrosModule.LogMessage($"Captured {exported.Skills.Count} skills");
         }
         catch (Exception ex)
         {
@@ -124,14 +155,24 @@ public class ExportedCharacter
         // Capture traits
         try
         {
-            foreach (var trait in DefaultTraits.Personality)
+            // Get trait objects from the game
+            var traitObjects = MBObjectManager.Instance?.GetObjectTypeList<TraitObject>();
+            if (traitObjects != null)
             {
-                var level = hero.GetTraitLevel(trait);
-                if (level != 0)
+                foreach (var trait in traitObjects)
                 {
-                    exported.Traits[trait.StringId] = level;
+                    try
+                    {
+                        var level = hero.GetTraitLevel(trait);
+                        if (level != 0)
+                        {
+                            exported.Traits[trait.StringId] = level;
+                        }
+                    }
+                    catch { }
                 }
             }
+            BannerBrosModule.LogMessage($"Captured {exported.Traits.Count} traits");
         }
         catch (Exception ex)
         {
@@ -152,6 +193,7 @@ public class ExportedCharacter
                     }
                 }
             }
+            BannerBrosModule.LogMessage($"Captured {exported.EquipmentIds.Count} equipment items");
         }
         catch (Exception ex)
         {

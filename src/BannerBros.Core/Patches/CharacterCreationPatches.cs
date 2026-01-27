@@ -1,6 +1,5 @@
 using HarmonyLib;
 using TaleWorlds.CampaignSystem;
-using TaleWorlds.CampaignSystem.CharacterCreationContent;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -39,6 +38,14 @@ public static class CharacterCreationPatches
     /// Event fired when character creation is complete and captured.
     /// </summary>
     public static event Action<ExportedCharacter>? OnCharacterCaptured;
+
+    /// <summary>
+    /// Invoke the OnCharacterCaptured event (callable from other classes).
+    /// </summary>
+    public static void RaiseCharacterCaptured(ExportedCharacter character)
+    {
+        OnCharacterCaptured?.Invoke(character);
+    }
 
     /// <summary>
     /// Call this to start character creation in co-op export mode.
@@ -107,19 +114,6 @@ public static class CharacterCreationFinalizedPatch
             }
         }
 
-        // Try CharacterCreationContentBase
-        var contentType = typeof(CharacterCreationContentBase);
-        foreach (var name in methodNames)
-        {
-            var method = contentType.GetMethod(name,
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (method != null)
-            {
-                BannerBrosModule.LogMessage($"Found character creation method in ContentBase: {name}");
-                return method;
-            }
-        }
-
         return null;
     }
 
@@ -148,7 +142,7 @@ public static class CharacterCreationFinalizedPatch
             captured.SaveToFile();
 
             // Fire event
-            CharacterCreationPatches.OnCharacterCaptured?.Invoke(captured);
+            CharacterCreationPatches.RaiseCharacterCaptured(captured);
 
             BannerBrosModule.LogMessage($"Character '{captured.Name}' captured successfully!");
             BannerBrosModule.LogMessage("Exiting to menu to join co-op server...");
@@ -191,9 +185,39 @@ public static class CharacterCreationFinalizedPatch
         // Exit to main menu - don't save this throwaway campaign
         try
         {
-            // Try to exit without saving
-            Game.Current?.GameStateManager?.CleanAndPushState(
-                Game.Current.GameStateManager.CreateState<MainMenuState>());
+            // Try to exit without saving using reflection to find the right state type
+            var gameStateManager = Game.Current?.GameStateManager;
+            if (gameStateManager != null)
+            {
+                // Try to find InitialState or similar menu state
+                var createStateMethod = gameStateManager.GetType().GetMethod("CreateState");
+                if (createStateMethod != null)
+                {
+                    // Look for available state types
+                    var assembly = typeof(Game).Assembly;
+                    var stateTypes = new[] { "InitialState", "MainMenuState", "LobbyState" };
+
+                    foreach (var stateName in stateTypes)
+                    {
+                        var stateType = assembly.GetType($"TaleWorlds.MountAndBlade.{stateName}") ??
+                                        assembly.GetType($"TaleWorlds.Core.{stateName}");
+                        if (stateType != null)
+                        {
+                            var genericMethod = createStateMethod.MakeGenericMethod(stateType);
+                            var newState = genericMethod.Invoke(gameStateManager, null);
+                            if (newState != null)
+                            {
+                                var cleanAndPush = gameStateManager.GetType().GetMethod("CleanAndPushState");
+                                cleanAndPush?.Invoke(gameStateManager, new[] { newState });
+                                BannerBrosModule.LogMessage($"Exiting to {stateName}...");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            BannerBrosModule.LogMessage("Could not auto-exit. Please exit to main menu manually.");
         }
         catch (Exception ex)
         {
@@ -231,7 +255,7 @@ public static class MapStateActivatePatch
                 CharacterCreationPatches.CapturedCharacter = captured;
                 captured.SaveToFile();
 
-                CharacterCreationPatches.OnCharacterCaptured?.Invoke(captured);
+                CharacterCreationPatches.RaiseCharacterCaptured(captured);
 
                 BannerBrosModule.LogMessage($"Character '{captured.Name}' captured!");
 
