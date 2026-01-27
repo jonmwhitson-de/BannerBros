@@ -339,8 +339,11 @@ public class SessionManager
             State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
         };
 
+        // DEBUG FLAG: Set to true to skip hero/party creation and test join without it
+        const bool SKIP_HERO_CREATION_FOR_DEBUG = true;
+
         // Handle the different cases:
-        if (exportedCharacter != null)
+        if (exportedCharacter != null && !SKIP_HERO_CREATION_FOR_DEBUG)
         {
             try
             {
@@ -393,7 +396,7 @@ public class SessionManager
                 player.State = PlayerState.InMenu;
             }
         }
-        else if (hasValidSavedCharacter && savedCharacter != null)
+        else if (hasValidSavedCharacter && savedCharacter != null && !SKIP_HERO_CREATION_FOR_DEBUG)
         {
             try
             {
@@ -409,6 +412,13 @@ public class SessionManager
                 BannerBrosModule.LogMessage($"ERROR reclaiming saved character: {savedEx.Message}");
                 player.State = PlayerState.InMenu;
             }
+        }
+
+        // When debug skipping hero creation, just mark player as in menu (spectator mode)
+        if (SKIP_HERO_CREATION_FOR_DEBUG)
+        {
+            BannerBrosModule.LogMessage($"DEBUG: Skipping hero creation - player joining as spectator");
+            player.State = PlayerState.InMenu;
         }
 
         try
