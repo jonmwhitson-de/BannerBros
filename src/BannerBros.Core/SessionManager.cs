@@ -534,22 +534,19 @@ public class SessionManager
                 return hero.PartyBelongedTo;
             }
 
-            // Get spawn position
-            var position = spawnSettlement.GatePosition;
-
             // Method 1: Try using Clan.CreateNewMobileParty (most reliable)
-            MobileParty? party = TryCreatePartyViaClan(hero, clan, position);
+            MobileParty? party = TryCreatePartyViaClan(hero, clan, spawnSettlement);
 
             // Method 2: Try using MobileParty.CreateParty with component
             if (party == null)
             {
-                party = TryCreatePartyWithComponent(hero, clan, spawnSettlement, position);
+                party = TryCreatePartyWithComponent(hero, clan, spawnSettlement);
             }
 
-            // Method 3: Try using reflection to call static factory method
+            // Method 3: Try using MobilePartyHelper
             if (party == null)
             {
-                party = TryCreatePartyViaStaticMethod(hero, clan, position);
+                party = TryCreatePartyViaHelper(hero, clan, spawnSettlement);
             }
 
             if (party != null)
@@ -558,7 +555,7 @@ public class SessionManager
             }
             else
             {
-                BannerBrosModule.LogMessage("All party creation methods failed");
+                BannerBrosModule.LogMessage("All party creation methods failed - hero has no map presence");
             }
 
             return party;
@@ -570,25 +567,32 @@ public class SessionManager
         }
     }
 
-    private MobileParty? TryCreatePartyViaClan(Hero hero, Clan clan, TaleWorlds.Library.Vec2 position)
+    private MobileParty? TryCreatePartyViaClan(Hero hero, Clan clan, Settlement spawnSettlement)
     {
         try
         {
             // Try Clan.CreateNewMobileParty - available in some Bannerlord versions
             var createMethod = typeof(Clan).GetMethod("CreateNewMobileParty",
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                new[] { typeof(Hero) },
-                null);
+                BindingFlags.Public | BindingFlags.Instance);
 
             if (createMethod != null)
             {
-                var party = createMethod.Invoke(clan, new object[] { hero }) as MobileParty;
-                if (party != null)
+                var parameters = createMethod.GetParameters();
+                object?[]? args = parameters.Length switch
                 {
-                    party.SetMoveGoToPoint(position);
-                    BannerBrosModule.LogMessage("Created party via Clan.CreateNewMobileParty");
-                    return party;
+                    1 when parameters[0].ParameterType == typeof(Hero) => new object[] { hero },
+                    2 => new object[] { hero, spawnSettlement },
+                    _ => null
+                };
+
+                if (args != null)
+                {
+                    var party = createMethod.Invoke(clan, args) as MobileParty;
+                    if (party != null)
+                    {
+                        BannerBrosModule.LogMessage("Created party via Clan.CreateNewMobileParty");
+                        return party;
+                    }
                 }
             }
         }
@@ -599,7 +603,7 @@ public class SessionManager
         return null;
     }
 
-    private MobileParty? TryCreatePartyWithComponent(Hero hero, Clan clan, Settlement settlement, TaleWorlds.Library.Vec2 position)
+    private MobileParty? TryCreatePartyWithComponent(Hero hero, Clan clan, Settlement settlement)
     {
         try
         {
@@ -611,50 +615,60 @@ public class SessionManager
 
             if (createMethod != null)
             {
-                // Try different parameter combinations
                 var parameters = createMethod.GetParameters();
                 object?[]? args = null;
 
-                if (parameters.Length == 2 && parameters[0].ParameterType == typeof(Hero))
+                // Match parameter types dynamically
+                if (parameters.Length >= 1 && parameters[0].ParameterType == typeof(Hero))
                 {
-                    if (parameters[1].ParameterType == typeof(Hero))
+                    if (parameters.Length == 1)
+                        args = new object?[] { hero };
+                    else if (parameters.Length == 2 && parameters[1].ParameterType == typeof(Hero))
                         args = new object?[] { hero, hero };
-                    else if (parameters[1].ParameterType == typeof(Settlement))
+                    else if (parameters.Length == 2 && parameters[1].ParameterType == typeof(Settlement))
                         args = new object?[] { hero, settlement };
-                }
-                else if (parameters.Length == 1 && parameters[0].ParameterType == typeof(Hero))
-                {
-                    args = new object?[] { hero };
                 }
 
                 if (args != null)
                 {
                     component = createMethod.Invoke(null, args) as PartyComponent;
+                    BannerBrosModule.LogMessage($"Created component via static method with {args.Length} args");
                 }
             }
 
+            // Try constructors if static method didn't work
             if (component == null)
             {
-                // Try direct constructor with non-public access
-                var ctor = typeof(LordPartyComponent).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                    .FirstOrDefault();
+                var constructors = typeof(LordPartyComponent).GetConstructors(
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
-                if (ctor != null)
+                foreach (var ctor in constructors)
                 {
-                    var ctorParams = ctor.GetParameters();
-                    object?[]? ctorArgs = ctorParams.Length switch
+                    try
                     {
-                        0 => Array.Empty<object?>(),
-                        1 when ctorParams[0].ParameterType == typeof(Hero) => new object?[] { hero },
-                        2 when ctorParams[0].ParameterType == typeof(Hero) && ctorParams[1].ParameterType == typeof(Hero)
-                            => new object?[] { hero, hero },
-                        _ => null
-                    };
+                        var ctorParams = ctor.GetParameters();
+                        object?[]? ctorArgs = null;
 
-                    if (ctorArgs != null)
-                    {
-                        component = ctor.Invoke(ctorArgs) as PartyComponent;
+                        if (ctorParams.Length == 0)
+                            ctorArgs = Array.Empty<object?>();
+                        else if (ctorParams.Length == 1 && ctorParams[0].ParameterType.IsAssignableFrom(typeof(Hero)))
+                            ctorArgs = new object?[] { hero };
+                        else if (ctorParams.Length == 2 &&
+                                 ctorParams[0].ParameterType.IsAssignableFrom(typeof(Hero)) &&
+                                 ctorParams[1].ParameterType.IsAssignableFrom(typeof(Hero)))
+                            ctorArgs = new object?[] { hero, hero };
+
+                        if (ctorArgs != null)
+                        {
+                            component = ctor.Invoke(ctorArgs) as PartyComponent;
+                            if (component != null)
+                            {
+                                BannerBrosModule.LogMessage($"Created component via constructor with {ctorArgs.Length} args");
+                                break;
+                            }
+                        }
                     }
+                    catch { }
                 }
             }
 
@@ -674,6 +688,9 @@ public class SessionManager
                         memberRoster.AddToCounts(clan.Culture.EliteBasicTroop, 2);
 
                     var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
+
+                    // Use settlement position
+                    var position = settlement.GetPosition2D;
                     party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, position);
                     party.ActualClan = clan;
 
@@ -689,48 +706,40 @@ public class SessionManager
         return null;
     }
 
-    private MobileParty? TryCreatePartyViaStaticMethod(Hero hero, Clan clan, TaleWorlds.Library.Vec2 position)
+    private MobileParty? TryCreatePartyViaHelper(Hero hero, Clan clan, Settlement settlement)
     {
         try
         {
-            // Try MobilePartyHelper or similar utility classes
-            var helperTypes = new[] { "TaleWorlds.CampaignSystem.MobilePartyHelper", "TaleWorlds.CampaignSystem.Actions.MobilePartyHelper" };
+            // Try to find and use MobilePartyHelper or similar
+            var assembly = typeof(MobileParty).Assembly;
 
-            foreach (var typeName in helperTypes)
+            // Look for helper classes that might have party creation methods
+            var helperTypeNames = new[]
             {
-                var helperType = Type.GetType(typeName + ", TaleWorlds.CampaignSystem");
+                "TaleWorlds.CampaignSystem.Actions.MobilePartyHelper",
+                "TaleWorlds.CampaignSystem.MobilePartyHelper",
+                "TaleWorlds.CampaignSystem.ClanActions"
+            };
+
+            foreach (var typeName in helperTypeNames)
+            {
+                var helperType = assembly.GetType(typeName);
                 if (helperType != null)
                 {
-                    var createMethod = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                        .FirstOrDefault(m => m.Name.Contains("CreateNewClanMobileParty") || m.Name.Contains("SpawnLordParty"));
-
-                    if (createMethod != null)
+                    var methods = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static);
+                    foreach (var method in methods)
                     {
-                        BannerBrosModule.LogMessage($"Found helper method: {createMethod.Name}");
-                        // Would need to match parameters dynamically
+                        if (method.Name.Contains("CreateNew") || method.Name.Contains("Spawn"))
+                        {
+                            BannerBrosModule.LogMessage($"Found potential helper: {typeName}.{method.Name}");
+                        }
                     }
                 }
-            }
-
-            // Last resort: Try EnterSettlementAction to place hero, then check if party was created
-            if (hero.PartyBelongedTo == null)
-            {
-                // Make the hero a party leader which should auto-create a party in some versions
-                try
-                {
-                    // This is a workaround - set hero as party leader of a new party
-                    var partyTemplateObject = clan.Culture?.DefaultPartyTemplate;
-                    if (partyTemplateObject != null)
-                    {
-                        BannerBrosModule.LogMessage("Attempting party template approach...");
-                    }
-                }
-                catch { }
             }
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Static method party creation failed: {ex.Message}");
+            BannerBrosModule.LogMessage($"Helper party creation failed: {ex.Message}");
         }
         return null;
     }
