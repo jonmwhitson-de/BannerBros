@@ -35,6 +35,7 @@ public class SessionManager
     public event Action<string>? OnJoinRejected;
     public event Action? OnCharacterCreationRequired;
     public event Action<CoopPlayer>? OnPlayerSpawned;
+    public event Action<SavedCharacterInfo>? OnSavedCharacterFound;
 
     public SessionManager(PlayerManager playerManager, WorldStateManager worldStateManager)
     {
@@ -179,8 +180,13 @@ public class SessionManager
             // Assign player ID
             var playerId = _nextPlayerId++;
 
-            // Check if this is a returning player with existing character
-            bool requiresCharacterCreation = !packet.HasExistingCharacter;
+            // Check if this player has a saved character they can reclaim
+            var savedCharacter = BannerBrosModule.Instance?.PlayerSaveData.FindCharacter(packet.PlayerName);
+            bool hasValidSavedCharacter = savedCharacter != null && PlayerSaveData.IsHeroValid(savedCharacter.HeroId);
+
+            // Player needs character creation if they don't have a valid saved character
+            // and haven't indicated they have an existing one
+            bool requiresCharacterCreation = !hasValidSavedCharacter && !packet.HasExistingCharacter;
 
             // Build response with current world state
             var response = new JoinResponsePacket
@@ -191,8 +197,21 @@ public class SessionManager
                 ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
             };
 
+            // If player has a saved character, include that info so they can reclaim it
+            if (hasValidSavedCharacter && savedCharacter != null)
+            {
+                response.WorldStateData = JsonConvert.SerializeObject(new SavedCharacterInfo
+                {
+                    HeroId = savedCharacter.HeroId,
+                    ClanId = savedCharacter.ClanId,
+                    PartyId = savedCharacter.PartyId,
+                    HeroName = GetHeroName(savedCharacter.HeroId)
+                });
+                BannerBrosModule.LogMessage($"Player {packet.PlayerName} has saved character: {savedCharacter.HeroId}");
+            }
+
             // Send response
-            BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}");
+            BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}, HasSaved={hasValidSavedCharacter}");
             networkManager.SendTo(peerId, response);
 
             // Create player entry (not fully initialized until character is created/loaded)
@@ -203,6 +222,18 @@ public class SessionManager
                 IsHost = false,
                 State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
             };
+
+            // If reclaiming saved character, link them now
+            if (hasValidSavedCharacter && savedCharacter != null)
+            {
+                player.HeroId = savedCharacter.HeroId;
+                player.ClanId = savedCharacter.ClanId;
+                player.PartyId = savedCharacter.PartyId;
+                player.State = PlayerState.OnMap;
+
+                // Update their position from the hero's party
+                UpdatePlayerPositionFromHero(player);
+            }
 
             _playerManager.AddPlayer(player);
 
@@ -216,6 +247,40 @@ public class SessionManager
         {
             BannerBrosModule.LogMessage($"HandleJoinRequest error: {ex.Message}");
             SendJoinResponse(peerId, false, "Server error processing join request");
+        }
+    }
+
+    private string GetHeroName(string heroId)
+    {
+        try
+        {
+            var hero = Campaign.Current?.CampaignObjectManager.Find<Hero>(heroId);
+            return hero?.Name?.ToString() ?? "Unknown";
+        }
+        catch
+        {
+            return "Unknown";
+        }
+    }
+
+    private void UpdatePlayerPositionFromHero(CoopPlayer player)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(player.HeroId)) return;
+
+            var hero = Campaign.Current?.CampaignObjectManager.Find<Hero>(player.HeroId);
+            if (hero?.PartyBelongedTo != null)
+            {
+                var pos = hero.PartyBelongedTo.GetPosition2D;
+                player.MapPositionX = pos.x;
+                player.MapPositionY = pos.y;
+                player.PartyId = hero.PartyBelongedTo.StringId;
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Error updating player position: {ex.Message}");
         }
     }
 
@@ -330,6 +395,15 @@ public class SessionManager
                 player.MapPositionX = result.SpawnX;
                 player.MapPositionY = result.SpawnY;
                 player.State = PlayerState.OnMap;
+
+                // Save the player-character mapping for reconnection
+                BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
+                    player.Name,
+                    result.HeroId ?? "",
+                    result.ClanId ?? "",
+                    result.PartyId ?? ""
+                );
+                BannerBrosModule.LogMessage($"Registered {player.Name} -> {result.HeroId} for reconnection");
 
                 SendCharacterCreationResponse(peerId, packet.PlayerId, true, null,
                     result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
@@ -794,6 +868,27 @@ public class SessionManager
                     };
                     _playerManager.AddPlayer(player);
                 }
+            }
+        }
+
+        // Check if we have a saved character we can reclaim
+        if (!string.IsNullOrEmpty(packet.WorldStateData))
+        {
+            try
+            {
+                var savedChar = JsonConvert.DeserializeObject<SavedCharacterInfo>(packet.WorldStateData);
+                if (savedChar != null && !string.IsNullOrEmpty(savedChar.HeroId))
+                {
+                    BannerBrosModule.LogMessage($"Found saved character: {savedChar.HeroName}");
+                    // Notify UI to show reclaim option
+                    OnSavedCharacterFound?.Invoke(savedChar);
+                    SetState(SessionState.InSession);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Error parsing saved character: {ex.Message}");
             }
         }
 

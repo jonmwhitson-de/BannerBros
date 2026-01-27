@@ -5,6 +5,7 @@ using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 using BannerBros.Client.UI;
 using BannerBros.Core;
+using BannerBros.Network;
 
 namespace BannerBros.Client;
 
@@ -52,6 +53,7 @@ public class ClientModule : MBSubModuleBase
             sessionManager.OnCharacterCreationRequired += OnCharacterCreationRequired;
             sessionManager.OnPlayerSpawned += OnPlayerSpawned;
             sessionManager.OnJoinRejected += OnJoinRejected;
+            sessionManager.OnSavedCharacterFound += OnSavedCharacterFound;
         }
     }
 
@@ -59,6 +61,24 @@ public class ClientModule : MBSubModuleBase
     {
         BannerBrosModule.LogMessage("Character creation required - opening creator");
         CharacterCreationUI.Show();
+    }
+
+    private void OnSavedCharacterFound(SavedCharacterInfo savedChar)
+    {
+        BannerBrosModule.LogMessage($"Reconnected to saved character: {savedChar.HeroName}");
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Welcome Back!",
+                $"You have reconnected as {savedChar.HeroName}.\n\nYour character and party have been restored.",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
     }
 
     private void OnPlayerSpawned(CoopPlayer player)

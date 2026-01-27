@@ -31,12 +31,24 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         CampaignEvents.TickEvent.AddNonSerializedListener(this, OnTick);
         CampaignEvents.HourlyTickEvent.AddNonSerializedListener(this, OnHourlyTick);
         CampaignEvents.DailyTickEvent.AddNonSerializedListener(this, OnDailyTick);
+        CampaignEvents.OnBeforeSaveEvent.AddNonSerializedListener(this, OnBeforeSave);
     }
 
     public override void SyncData(IDataStore dataStore)
     {
-        // Sync co-op specific data with save game
-        // This is called when saving/loading - we track player IDs for reconnection
+        // SyncData is called during save/load
+        // We use external JSON file instead of save data to avoid compatibility issues
+    }
+
+    private void OnBeforeSave()
+    {
+        // Save player data to external file when game saves
+        var module = BannerBrosModule.Instance;
+        if (module?.IsHost == true && module.IsConnected)
+        {
+            module.PlayerSaveData.Save();
+            BannerBrosModule.LogMessage("Player data saved with game");
+        }
     }
 
     private void OnSessionLaunched(CampaignGameStarter starter)
@@ -46,6 +58,13 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         _worldSyncTimer = 0;
         _campaignReady = false;
         _readyCheckTimer = 0;
+
+        // Load saved player data for this campaign
+        var module = BannerBrosModule.Instance;
+        if (module != null)
+        {
+            module.PlayerSaveData = PlayerSaveData.Load();
+        }
     }
 
     private void OnTick(float dt)

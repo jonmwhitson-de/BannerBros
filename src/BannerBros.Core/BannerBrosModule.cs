@@ -24,6 +24,7 @@ public class BannerBrosModule : MBSubModuleBase
     public PlayerManager PlayerManager { get; private set; } = null!;
     public WorldStateManager WorldStateManager { get; private set; } = null!;
     public SessionManager SessionManager { get; private set; } = null!;
+    public PlayerSaveData PlayerSaveData { get; private set; } = new();
 
     public bool IsHost { get; private set; }
     public bool IsConnected { get; private set; }

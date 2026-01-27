@@ -236,3 +236,14 @@ public class TradeItem
     public int Count { get; set; }
     public int ModifierValue { get; set; }
 }
+
+/// <summary>
+/// Info about a saved character that a player can reclaim.
+/// </summary>
+public class SavedCharacterInfo
+{
+    public string HeroId { get; set; } = "";
+    public string ClanId { get; set; } = "";
+    public string PartyId { get; set; } = "";
+    public string HeroName { get; set; } = "";
+}
