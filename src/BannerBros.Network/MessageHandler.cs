@@ -43,6 +43,9 @@ public class MessageHandler
     public event Action<FollowCommandPacket, int>? OnFollowCommandReceived;
     public event Action<CommandResultPacket>? OnCommandResultReceived;
 
+    // Debug log streaming
+    public event Action<DebugLogPacket, int>? OnDebugLogReceived;
+
     public MessageHandler(NetworkManager networkManager)
     {
         _networkManager = networkManager;
@@ -308,5 +311,16 @@ public class MessageHandler
         Console.WriteLine($"[BannerBros.Network] Command result for player {packet.PlayerId}: {packet.CommandType} Success={packet.Success}");
         if (_networkManager.IsHost) return;
         OnCommandResultReceived?.Invoke(packet);
+    }
+
+    // ========================================================================
+    // Debug Log Streaming
+    // ========================================================================
+
+    public void HandleDebugLog(DebugLogPacket packet, NetPeer peer)
+    {
+        // Only host receives debug logs from clients
+        if (!_networkManager.IsHost) return;
+        OnDebugLogReceived?.Invoke(packet, peer.Id);
     }
 }

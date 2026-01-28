@@ -412,3 +412,14 @@ public class CommandResultPacket
     public bool Success { get; set; }
     public string ErrorMessage { get; set; } = "";
 }
+
+/// <summary>
+/// Debug log message sent from client to server when debug streaming is enabled.
+/// </summary>
+public class DebugLogPacket
+{
+    public int PlayerId { get; set; }
+    public string PlayerName { get; set; } = "";
+    public string Message { get; set; } = "";
+    public long TimestampTicks { get; set; }
+}

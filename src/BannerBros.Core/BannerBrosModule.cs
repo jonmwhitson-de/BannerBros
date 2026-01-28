@@ -1,4 +1,5 @@
 using HarmonyLib;
+using LiteNetLib;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -252,6 +253,12 @@ public class BannerBrosModule : MBSubModuleBase
             }
             NetworkManager.Instance?.StartHost(port, Config.MaxPlayers);
 
+            // Subscribe to debug log streaming from clients
+            if (NetworkManager.Instance?.Messages != null)
+            {
+                NetworkManager.Instance.Messages.OnDebugLogReceived += OnDebugLogReceived;
+            }
+
             LogMessage("HostSession: Initializing SessionManager...");
             SessionManager.Initialize();
 
@@ -272,10 +279,26 @@ public class BannerBrosModule : MBSubModuleBase
         }
     }
 
+    /// <summary>
+    /// Called on server when receiving debug logs from a client.
+    /// </summary>
+    private void OnDebugLogReceived(DebugLogPacket packet, int peerId)
+    {
+        var timestamp = new DateTime(packet.TimestampTicks);
+        DebugLog.LogRemoteClient(packet.Message, packet.PlayerId, packet.PlayerName, timestamp);
+    }
+
     public void JoinSession(string address, int port = 7777)
     {
-        // Initialize debug logging for client
-        DebugLog.Initialize(isHost: false);
+        // Initialize debug logging for client with streaming if enabled
+        var streamLogs = Config.StreamClientLogs;
+        DebugLog.Initialize(isHost: false, streamToServer: streamLogs, playerId: 0, playerName: Config.PlayerName);
+
+        // Set up the callback to send logs to server
+        if (streamLogs)
+        {
+            DebugLog.SendToServerCallback = SendDebugLogToServer;
+        }
 
         if (NetworkManager.Instance == null)
         {
@@ -299,6 +322,24 @@ public class BannerBrosModule : MBSubModuleBase
         NetworkManager.Instance.Connect(address, port);
         IsConnected = true;
         LogMessage($"Joining session at {address}:{port}");
+    }
+
+    /// <summary>
+    /// Sends a debug log message to the server (client only).
+    /// </summary>
+    private void SendDebugLogToServer(string message, int playerId, string playerName)
+    {
+        if (IsHost || NetworkManager.Instance == null) return;
+
+        var packet = new DebugLogPacket
+        {
+            PlayerId = playerId,
+            PlayerName = playerName,
+            Message = message,
+            TimestampTicks = DateTime.Now.Ticks
+        };
+
+        NetworkManager.Instance.SendToServer(packet, LiteNetLib.DeliveryMethod.ReliableUnordered);
     }
 
     /// <summary>
@@ -419,6 +460,13 @@ public class BannerBrosModule : MBSubModuleBase
         SaveFileTransferManager?.Cleanup();
         SpectatorModeManager?.Cleanup();
         CommandHandler?.Cleanup();
+
+        // Clean up debug log streaming
+        DebugLog.SendToServerCallback = null;
+        if (NetworkManager.Instance?.Messages != null)
+        {
+            NetworkManager.Instance.Messages.OnDebugLogReceived -= OnDebugLogReceived;
+        }
 
         NetworkManager.Instance?.Disconnect();
         SessionManager.Cleanup();

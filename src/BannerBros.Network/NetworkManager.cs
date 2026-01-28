@@ -86,6 +86,9 @@ public class NetworkManager : INetEventListener
         _packetProcessor.SubscribeReusable<AttackCommandPacket, NetPeer>(_messageHandler.HandleAttackCommand);
         _packetProcessor.SubscribeReusable<FollowCommandPacket, NetPeer>(_messageHandler.HandleFollowCommand);
         _packetProcessor.SubscribeReusable<CommandResultPacket, NetPeer>(_messageHandler.HandleCommandResult);
+
+        // Debug log streaming
+        _packetProcessor.SubscribeReusable<DebugLogPacket, NetPeer>(_messageHandler.HandleDebugLog);
     }
 
     public void StartHost(int port, int maxPlayers = 4)

@@ -54,6 +54,12 @@ public class BannerBrosConfig
     /// </summary>
     public string PlayerName { get; set; } = "Player";
 
+    /// <summary>
+    /// When true, client debug logs are streamed to the server.
+    /// Server will write them to BannerBros_ClientRemote.log.
+    /// </summary>
+    public bool StreamClientLogs { get; set; } = false;
+
     public static BannerBrosConfig Load()
     {
         try
