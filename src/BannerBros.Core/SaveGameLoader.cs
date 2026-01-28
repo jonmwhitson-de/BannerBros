@@ -125,20 +125,86 @@ public static class SaveGameLoader
             if (refreshMethod != null)
             {
                 BannerBrosModule.LogMessage("[SaveLoader] Refreshing save file list...");
-                refreshMethod.Invoke(null, null);
+                var refreshParams = refreshMethod.GetParameters();
+                if (refreshParams.Length == 0)
+                {
+                    refreshMethod.Invoke(null, null);
+                }
+                else
+                {
+                    // Try with default parameters
+                    var args = new object[refreshParams.Length];
+                    for (int i = 0; i < refreshParams.Length; i++)
+                    {
+                        args[i] = refreshParams[i].HasDefaultValue ? refreshParams[i].DefaultValue : null;
+                    }
+                    refreshMethod.Invoke(null, args);
+                }
             }
 
+            // Find GetSaveFiles method - try different overloads
             var getSaveFilesMethod = mbSaveLoadType.GetMethod("GetSaveFiles", BindingFlags.Public | BindingFlags.Static);
+            if (getSaveFilesMethod == null)
+            {
+                // Try getting all methods named GetSaveFiles
+                var methods = mbSaveLoadType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .Where(m => m.Name == "GetSaveFiles")
+                    .ToArray();
+                BannerBrosModule.LogMessage($"[SaveLoader] Found {methods.Length} GetSaveFiles methods");
+                getSaveFilesMethod = methods.FirstOrDefault();
+            }
+
             if (getSaveFilesMethod == null)
             {
                 BannerBrosModule.LogMessage("[SaveLoader] GetSaveFiles method not found");
                 return null;
             }
 
-            var saveFiles = getSaveFilesMethod.Invoke(null, null) as System.Collections.IEnumerable;
+            // Call with appropriate parameters
+            var getParams = getSaveFilesMethod.GetParameters();
+            BannerBrosModule.LogMessage($"[SaveLoader] GetSaveFiles has {getParams.Length} params: {string.Join(", ", getParams.Select(p => p.ParameterType.Name))}");
+
+            object? saveFiles;
+            if (getParams.Length == 0)
+            {
+                saveFiles = getSaveFilesMethod.Invoke(null, null);
+            }
+            else
+            {
+                // Build args with defaults
+                var args = new object?[getParams.Length];
+                for (int i = 0; i < getParams.Length; i++)
+                {
+                    if (getParams[i].HasDefaultValue)
+                    {
+                        args[i] = getParams[i].DefaultValue;
+                    }
+                    else if (getParams[i].ParameterType == typeof(bool))
+                    {
+                        args[i] = false;
+                    }
+                    else if (getParams[i].ParameterType == typeof(string))
+                    {
+                        args[i] = "";
+                    }
+                    else
+                    {
+                        args[i] = null;
+                    }
+                }
+                saveFiles = getSaveFilesMethod.Invoke(null, args);
+            }
+
             if (saveFiles == null)
             {
                 BannerBrosModule.LogMessage("[SaveLoader] GetSaveFiles returned null");
+                return null;
+            }
+
+            var saveFilesEnumerable = saveFiles as System.Collections.IEnumerable;
+            if (saveFilesEnumerable == null)
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] GetSaveFiles returned non-enumerable: {saveFiles.GetType().Name}");
                 return null;
             }
 
@@ -147,7 +213,7 @@ public static class SaveGameLoader
 
             object? foundSave = null;
             int count = 0;
-            foreach (var saveFile in saveFiles)
+            foreach (var saveFile in saveFilesEnumerable)
             {
                 var nameProperty = saveFile.GetType().GetProperty("Name");
                 var name = nameProperty?.GetValue(saveFile) as string ?? "(unknown)";
