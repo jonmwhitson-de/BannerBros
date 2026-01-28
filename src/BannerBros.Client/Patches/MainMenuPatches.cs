@@ -25,12 +25,17 @@ public static class MainMenuPatches
     {
         public static void Postfix(InitialMenuVM __instance)
         {
+            BannerBrosModule.LogMessage("[MainMenu] RefreshMenuOptions patch triggered");
+
             try
             {
                 // Access the menu options via reflection since MenuOptions might be private
                 var menuOptionsField = typeof(InitialMenuVM).GetProperty("MenuOptions");
+                BannerBrosModule.LogMessage($"[MainMenu] MenuOptions property: {(menuOptionsField != null ? "found" : "NOT FOUND")}");
+
                 if (menuOptionsField?.GetValue(__instance) is MBBindingList<InitialMenuOptionVM> menuOptions)
                 {
+                    BannerBrosModule.LogMessage($"[MainMenu] Found {menuOptions.Count} existing menu options");
                     // Find where to insert (after "Campaign" option)
                     int insertIndex = 0;
                     for (int i = 0; i < menuOptions.Count; i++)
@@ -47,6 +52,8 @@ public static class MainMenuPatches
                     bool hasCoopOptions = menuOptions.Any(m =>
                         m.InitialStateOption?.Id == "BannerBros_Host" ||
                         m.InitialStateOption?.Id == "BannerBros_Join");
+
+                    BannerBrosModule.LogMessage($"[MainMenu] Has existing co-op options: {hasCoopOptions}, Insert index: {insertIndex}");
 
                     if (!hasCoopOptions)
                     {
@@ -66,11 +73,25 @@ public static class MainMenuPatches
                             () => MainMenuExtension.ShowJoinDialog()
                         );
 
+                        BannerBrosModule.LogMessage($"[MainMenu] Created hostOption: {hostOption != null}, joinOption: {joinOption != null}");
+
                         if (hostOption != null)
+                        {
                             menuOptions.Insert(Math.Min(insertIndex, menuOptions.Count), hostOption);
+                            BannerBrosModule.LogMessage("[MainMenu] Inserted 'Host Co-op' option");
+                        }
                         if (joinOption != null)
+                        {
                             menuOptions.Insert(Math.Min(insertIndex + 1, menuOptions.Count), joinOption);
+                            BannerBrosModule.LogMessage("[MainMenu] Inserted 'Join Co-op' option");
+                        }
+
+                        BannerBrosModule.LogMessage($"[MainMenu] Menu now has {menuOptions.Count} options");
                     }
+                }
+                else
+                {
+                    BannerBrosModule.LogMessage("[MainMenu] MenuOptions is null or wrong type");
                 }
             }
             catch (Exception ex)
