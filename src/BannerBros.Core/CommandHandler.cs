@@ -221,18 +221,49 @@ public class CommandHandler
                     // Initialize roster with hero
                     var memberRoster = TroopRoster.CreateDummyTroopRoster();
                     memberRoster.AddToCounts(hero.CharacterObject, 1);
+                    var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
+                    var posVec2 = new Vec2(spawnX, spawnY);
 
-                    // Try to initialize party
+                    // Try to initialize party using reflection for API compatibility
+                    bool initialized = false;
                     try
                     {
-                        party.InitializeMobilePartyAroundPosition(memberRoster, TroopRoster.CreateDummyTroopRoster(),
-                            new Vec2(spawnX, spawnY), 1.0f, 0.5f);
+                        var initMethod = party.GetType().GetMethod("InitializeMobilePartyAroundPosition");
+                        if (initMethod != null)
+                        {
+                            initMethod.Invoke(party, new object[] { posVec2, 1f });
+                            initialized = true;
+                        }
                     }
-                    catch
+                    catch { }
+
+                    if (!initialized)
                     {
-                        // Fallback - add troops directly
-                        party.MemberRoster.AddToCounts(hero.CharacterObject, 1);
+                        try
+                        {
+                            var initMethod = party.GetType().GetMethod("InitializeMobilePartyAtPosition");
+                            if (initMethod != null)
+                            {
+                                initMethod.Invoke(party, new object[] { memberRoster, prisonerRoster, posVec2 });
+                                initialized = true;
+                            }
+                        }
+                        catch { }
                     }
+
+                    if (!initialized)
+                    {
+                        // Last resort - just set position via reflection
+                        try
+                        {
+                            var posProp = party.GetType().GetProperty("Position2D");
+                            posProp?.SetValue(party, posVec2);
+                        }
+                        catch { }
+                    }
+
+                    // Add troops to roster
+                    party.MemberRoster.Add(memberRoster);
 
                     // Set party ownership via reflection
                     try
@@ -296,24 +327,9 @@ public class CommandHandler
                 return;
             }
 
-            // Set party to move to target position
+            // Set party to move to target position via reflection
             var targetPos = new Vec2(packet.TargetX, packet.TargetY);
-
-            try
-            {
-                // Try SetMovePatrolAroundPoint or direct position set
-                party.Ai?.SetMovePatrolAroundPoint(targetPos);
-            }
-            catch
-            {
-                // Fallback: directly set position (less smooth)
-                try
-                {
-                    var posProp = party.GetType().GetProperty("Position2D");
-                    posProp?.SetValue(party, targetPos);
-                }
-                catch { }
-            }
+            SetPartyTargetPosition(party, targetPos);
 
             player.MapPositionX = packet.TargetX;
             player.MapPositionY = packet.TargetY;
@@ -349,12 +365,8 @@ public class CommandHandler
             }
 
             // Move party to settlement
-            try
-            {
-                var settlementPos = settlement.GatePosition;
-                party.Ai?.SetMovePatrolAroundPoint(new Vec2(settlementPos.X, settlementPos.Y));
-            }
-            catch { }
+            var settlementPos = settlement.GatePosition;
+            SetPartyTargetPosition(party, new Vec2(settlementPos.X, settlementPos.Y));
 
             SendCommandResult(peerId, packet.PlayerId, "EnterSettlement", true, null);
         }
@@ -421,12 +433,8 @@ public class CommandHandler
             }
 
             // Set party to pursue target (attack when in range)
-            try
-            {
-                var targetPos = targetParty.GetPosition2D;
-                party.Ai?.SetMovePatrolAroundPoint(targetPos);
-            }
-            catch { }
+            var targetPos = targetParty.GetPosition2D;
+            SetPartyTargetPosition(party, targetPos);
 
             SendCommandResult(peerId, packet.PlayerId, "Attack", true, null);
         }
@@ -459,12 +467,8 @@ public class CommandHandler
             }
 
             // Set party to follow target
-            try
-            {
-                var targetPos = targetParty.GetPosition2D;
-                party.Ai?.SetMovePatrolAroundPoint(targetPos);
-            }
-            catch { }
+            var targetPos = targetParty.GetPosition2D;
+            SetPartyTargetPosition(party, targetPos);
 
             SendCommandResult(peerId, packet.PlayerId, "Follow", true, null);
         }
@@ -472,6 +476,52 @@ public class CommandHandler
         {
             SendCommandResult(peerId, packet.PlayerId, "Follow", false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Sets party target position using reflection for API compatibility.
+    /// Tries multiple methods since Bannerlord API varies between versions.
+    /// </summary>
+    private void SetPartyTargetPosition(MobileParty party, Vec2 targetPos)
+    {
+        if (party == null) return;
+
+        // Try various AI movement methods via reflection
+        var ai = party.Ai;
+        if (ai != null)
+        {
+            // Try SetMoveGoToPoint
+            try
+            {
+                var method = ai.GetType().GetMethod("SetMoveGoToPoint");
+                if (method != null)
+                {
+                    method.Invoke(ai, new object[] { targetPos });
+                    return;
+                }
+            }
+            catch { }
+
+            // Try SetMovePatrolAroundPoint
+            try
+            {
+                var method = ai.GetType().GetMethod("SetMovePatrolAroundPoint");
+                if (method != null)
+                {
+                    method.Invoke(ai, new object[] { targetPos });
+                    return;
+                }
+            }
+            catch { }
+        }
+
+        // Fallback: directly set position via reflection
+        try
+        {
+            var posProp = party.GetType().GetProperty("Position2D");
+            posProp?.SetValue(party, targetPos);
+        }
+        catch { }
     }
 
     /// <summary>
