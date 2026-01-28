@@ -2353,11 +2353,69 @@ public class SessionManager
             player.PartySize = packet.PartySize;
             player.PartySpeed = packet.PartySpeed;
 
-            // Host: Update the shadow party position to match client's movement
-            if (NetworkManager.Instance?.IsHost == true && !player.IsHost)
+            var isHost = NetworkManager.Instance?.IsHost == true;
+
+            if (isHost && !player.IsHost)
             {
+                // Host: Update the shadow party position to match client's movement
                 UpdateShadowPartyPosition(player);
             }
+            else if (!isHost)
+            {
+                // Client: Update local party position to match host's data
+                // This makes other players visible on the client's map
+                UpdateLocalPartyPosition(player);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Updates a party's position on the client's local map to match host data.
+    /// This is how clients see other players moving.
+    /// </summary>
+    private void UpdateLocalPartyPosition(CoopPlayer player)
+    {
+        if (string.IsNullOrEmpty(player.PartyId)) return;
+        if (Campaign.Current == null) return;
+
+        try
+        {
+            // Find the party in our local campaign
+            var party = Campaign.Current.MobileParties
+                .FirstOrDefault(p => p.StringId == player.PartyId);
+
+            if (party != null)
+            {
+                var newPos = new Vec2(player.MapPositionX, player.MapPositionY);
+
+                // Update position via reflection for API compatibility
+                try
+                {
+                    var posProp = party.GetType().GetProperty("Position2D");
+                    if (posProp?.CanWrite == true)
+                    {
+                        posProp.SetValue(party, newPos);
+                    }
+                }
+                catch { }
+
+                // Also update the party's visual position if needed
+                try
+                {
+                    party.Ai?.SetDoNotMakeNewDecisions(true);
+                }
+                catch { }
+            }
+            else
+            {
+                // Party not found - might need to be created
+                // This happens if the party was created after we loaded the save
+                DebugFileLog.Log($"[Sync] Party {player.PartyId} not found for {player.Name}");
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugFileLog.Log($"[Sync] UpdateLocalPartyPosition error: {ex.Message}");
         }
     }
 

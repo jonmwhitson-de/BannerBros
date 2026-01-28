@@ -41,7 +41,29 @@ public class SpectatorModeManager
 
         BannerBrosModule.LogMessage("[Spectator] Initializing SpectatorModeManager");
         networkManager.Messages.OnPartyAssignmentReceived += HandlePartyAssignment;
-        BannerBrosModule.LogMessage("[Spectator] Party assignment handler registered");
+        networkManager.Messages.OnCommandResultReceived += HandleCommandResult;
+        BannerBrosModule.LogMessage("[Spectator] Party assignment and command result handlers registered");
+    }
+
+    /// <summary>
+    /// Handles command result from host.
+    /// </summary>
+    private void HandleCommandResult(CommandResultPacket packet)
+    {
+        var module = BannerBrosModule.Instance;
+        var localPlayer = module?.PlayerManager.GetLocalPlayer();
+
+        // Only process results for our commands
+        if (localPlayer == null || packet.PlayerId != localPlayer.NetworkId) return;
+
+        if (packet.Success)
+        {
+            BannerBrosModule.LogMessage($"[Spectator] Command {packet.CommandType} executed successfully");
+        }
+        else
+        {
+            BannerBrosModule.LogMessage($"[Spectator] Command {packet.CommandType} failed: {packet.ErrorMessage}");
+        }
     }
 
     public void Cleanup()
@@ -50,6 +72,7 @@ public class SpectatorModeManager
         if (networkManager == null) return;
 
         networkManager.Messages.OnPartyAssignmentReceived -= HandlePartyAssignment;
+        networkManager.Messages.OnCommandResultReceived -= HandleCommandResult;
 
         ExitSpectatorMode();
     }
@@ -345,5 +368,93 @@ public class SpectatorModeManager
             return AssignedParty.GetPosition2D;
         }
         return Vec2.Zero;
+    }
+
+    /// <summary>
+    /// Sends a movement command to the host.
+    /// Client controls their assigned party by sending commands, not direct control.
+    /// </summary>
+    public void SendMoveCommand(float targetX, float targetY)
+    {
+        var networkManager = NetworkManager.Instance;
+        var module = BannerBrosModule.Instance;
+
+        if (networkManager == null || module == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot send move: NetworkManager or Module is null");
+            return;
+        }
+
+        if (networkManager.IsHost)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Host doesn't need to send move commands");
+            return;
+        }
+
+        var localPlayer = module.PlayerManager.GetLocalPlayer();
+        if (localPlayer == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot send move: No local player");
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"[Spectator] Sending move command to ({targetX:F1}, {targetY:F1})");
+
+        var packet = new MoveCommandPacket
+        {
+            PlayerId = localPlayer.NetworkId,
+            TargetX = targetX,
+            TargetY = targetY
+        };
+
+        networkManager.SendToServer(packet);
+    }
+
+    /// <summary>
+    /// Sends an attack command to the host.
+    /// </summary>
+    public void SendAttackCommand(string targetPartyId)
+    {
+        var networkManager = NetworkManager.Instance;
+        var module = BannerBrosModule.Instance;
+
+        if (networkManager == null || module == null || networkManager.IsHost) return;
+
+        var localPlayer = module.PlayerManager.GetLocalPlayer();
+        if (localPlayer == null) return;
+
+        BannerBrosModule.LogMessage($"[Spectator] Sending attack command on {targetPartyId}");
+
+        var packet = new AttackCommandPacket
+        {
+            PlayerId = localPlayer.NetworkId,
+            TargetPartyId = targetPartyId
+        };
+
+        networkManager.SendToServer(packet);
+    }
+
+    /// <summary>
+    /// Sends a follow command to the host.
+    /// </summary>
+    public void SendFollowCommand(string targetPartyId)
+    {
+        var networkManager = NetworkManager.Instance;
+        var module = BannerBrosModule.Instance;
+
+        if (networkManager == null || module == null || networkManager.IsHost) return;
+
+        var localPlayer = module.PlayerManager.GetLocalPlayer();
+        if (localPlayer == null) return;
+
+        BannerBrosModule.LogMessage($"[Spectator] Sending follow command for {targetPartyId}");
+
+        var packet = new FollowCommandPacket
+        {
+            PlayerId = localPlayer.NetworkId,
+            TargetPartyId = targetPartyId
+        };
+
+        networkManager.SendToServer(packet);
     }
 }
