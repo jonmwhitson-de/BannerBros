@@ -779,9 +779,25 @@ public class SessionManager
                 clan.SetLeader(hero);
             }
 
-            // Get spawn position - use client's position
-            var spawnX = packet.MapX;
-            var spawnY = packet.MapY;
+            // Get spawn position - spawn near HOST's position, not client's
+            // Client's position is from their separate campaign and won't match
+            float spawnX, spawnY;
+            if (MobileParty.MainParty != null)
+            {
+                var hostPos = MobileParty.MainParty.GetPosition2D;
+                // Spawn slightly offset from host
+                spawnX = hostPos.x + 1.0f;
+                spawnY = hostPos.y + 1.0f;
+                DebugFileLog.Log($"Spawning shadow near host at ({spawnX}, {spawnY})");
+            }
+            else
+            {
+                // Fallback to settlement position
+                var settlePos = spawnSettlement.GatePosition;
+                spawnX = settlePos.X;
+                spawnY = settlePos.Y;
+                DebugFileLog.Log($"Spawning shadow at settlement ({spawnX}, {spawnY})");
+            }
 
             // Create party
             MobileParty? party = CreatePlayerParty(hero, clan, spawnSettlement);
@@ -2324,6 +2340,54 @@ public class SessionManager
             player.KingdomId = packet.KingdomId;
             player.PartySize = packet.PartySize;
             player.PartySpeed = packet.PartySpeed;
+
+            // Host: Update the shadow party position to match client's movement
+            if (NetworkManager.Instance?.IsHost == true && !player.IsHost)
+            {
+                UpdateShadowPartyPosition(player);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Updates the shadow party position on the host to match client's movement.
+    /// Called when receiving position updates from clients.
+    /// </summary>
+    private void UpdateShadowPartyPosition(CoopPlayer player)
+    {
+        if (string.IsNullOrEmpty(player.PartyId)) return;
+        if (Campaign.Current == null) return;
+
+        try
+        {
+            // Find the shadow party
+            var party = Campaign.Current.MobileParties
+                .FirstOrDefault(p => p.StringId == player.PartyId);
+
+            if (party != null)
+            {
+                // Move shadow to client's reported position (relative to host's map)
+                // For now, we sync position but this won't perfectly match since
+                // client has a different campaign. This is MVP - positions approximate.
+                var newPos = new Vec2(player.MapPositionX, player.MapPositionY);
+
+                try
+                {
+                    var posProp = party.GetType().GetProperty("Position2D");
+                    if (posProp?.CanWrite == true)
+                    {
+                        posProp.SetValue(party, newPos);
+                    }
+                }
+                catch
+                {
+                    // Position sync failed - not critical
+                }
+            }
+        }
+        catch
+        {
+            // Ignore errors in shadow position sync
         }
     }
 
