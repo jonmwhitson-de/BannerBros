@@ -303,17 +303,20 @@ public class BannerBrosModule : MBSubModuleBase
         LogMessage($"Save file ready at: {savePath}");
         PendingSaveFilePath = savePath;
 
-        // Attempt auto-load after a small delay for file system to settle
-        LogMessage("Attempting to auto-load save file...");
+        var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
 
+        // Show loading message
+        LogMessage("*** SAVE TRANSFER COMPLETE ***");
+        LogMessage($"*** Loading {saveName}... ***");
+
+        // Attempt auto-load after a small delay for file system to settle
         System.Threading.Tasks.Task.Run(async () =>
         {
-            await System.Threading.Tasks.Task.Delay(500);
+            await System.Threading.Tasks.Task.Delay(1000); // Give file system time
 
-            // Must run on main thread via game's action queue
+            // Must run on main thread
             try
             {
-                // Try to queue on main thread
                 var utilitiesType = typeof(TaleWorlds.Engine.Utilities);
                 var enqueueMethod = utilitiesType.GetMethod("EnqueueAction",
                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
@@ -324,7 +327,6 @@ public class BannerBrosModule : MBSubModuleBase
                 }
                 else
                 {
-                    // Fallback: try directly (may cause threading issues)
                     TryAutoLoadSave(savePath);
                 }
             }
@@ -341,21 +343,26 @@ public class BannerBrosModule : MBSubModuleBase
     /// </summary>
     private void TryAutoLoadSave(string savePath)
     {
+        var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
+
         try
         {
+            LogMessage($"[AutoLoad] Attempting to load: {saveName}");
+
             if (SaveGameLoader.LoadSaveFile(savePath))
             {
-                LogMessage("Save file auto-load initiated!");
+                LogMessage("[AutoLoad] Save loading initiated!");
+                // The game will now transition to campaign
             }
             else
             {
-                LogMessage("Auto-load failed - showing manual instructions");
+                LogMessage("[AutoLoad] Auto-load failed");
                 ShowManualLoadInstructions(savePath);
             }
         }
         catch (Exception ex)
         {
-            LogMessage($"Auto-load error: {ex.Message}");
+            LogMessage($"[AutoLoad] Error: {ex.Message}");
             ShowManualLoadInstructions(savePath);
         }
     }
@@ -366,16 +373,21 @@ public class BannerBrosModule : MBSubModuleBase
     private void ShowManualLoadInstructions(string savePath)
     {
         var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
+
+        // Show a prominent dialog - user MUST use Load Game, NOT Continue Campaign
         InformationManager.ShowInquiry(
             new InquiryData(
-                "Load Save Manually",
-                $"Auto-load not available. Please:\n\n" +
-                $"1. Go to 'Load Game' on the main menu\n" +
-                $"2. Load the save named '{saveName}'\n" +
-                $"3. You'll enter spectator mode automatically",
+                "Load Co-op Save",
+                $"The host's save file is ready!\n\n" +
+                $"IMPORTANT: Do NOT use 'Continue Campaign'\n\n" +
+                $"Instead:\n" +
+                $"1. Click 'Load Game' on the main menu\n" +
+                $"2. Find and load: {saveName}\n" +
+                $"3. You'll join the host's world automatically\n\n" +
+                $"The save file starts with 'CoOp_'",
                 true,
                 false,
-                "OK",
+                "Got it!",
                 "",
                 null,
                 null
