@@ -93,8 +93,17 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         }
                         else
                         {
-                            // Client: notify host that our campaign has loaded
-                            SendCampaignReadyToHost();
+                            // Client: Check if this is a co-op save (spectator mode)
+                            if (ShouldEnterSpectatorMode())
+                            {
+                                BannerBrosModule.LogMessage("Detected co-op save - entering spectator mode");
+                                BannerBrosModule.Instance?.SpectatorModeManager.EnterSpectatorMode();
+                            }
+                            else
+                            {
+                                // Normal client join - notify host that our campaign has loaded
+                                SendCampaignReadyToHost();
+                            }
                         }
                     }
                 }
@@ -123,6 +132,35 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         {
             BannerBrosModule.LogMessage($"OnTick error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Checks if the client should enter spectator mode (loaded a co-op save).
+    /// </summary>
+    private bool ShouldEnterSpectatorMode()
+    {
+        var module = BannerBrosModule.Instance;
+        if (module == null) return false;
+
+        // Check if we're connected as a client
+        if (!module.IsConnected || module.IsHost) return false;
+
+        // Check if we have a pending co-op save file path
+        if (!string.IsNullOrEmpty(module.PendingSaveFilePath))
+        {
+            BannerBrosModule.LogMessage($"[Spectator] PendingSaveFilePath set: {module.PendingSaveFilePath}");
+            return true;
+        }
+
+        // Check if the session state indicates we should be in spectator mode
+        if (module.SessionState == SessionState.WaitingForSaveFile ||
+            module.SessionState == SessionState.SpectatorMode)
+        {
+            BannerBrosModule.LogMessage($"[Spectator] SessionState indicates spectator: {module.SessionState}");
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -111,6 +111,98 @@ public static class MainMenuExtension
 
     public static void ShowJoinDialog()
     {
+        // Show options: Join existing campaign (spectator) or create new character
+        var inquiry = new InquiryData(
+            "Join Co-op Session",
+            "Choose how to join:\n\n" +
+            "• Join Campaign - Connect and load the host's save file (recommended)\n" +
+            "• Create Character - Go through character creation first",
+            true,
+            true,
+            "Join Campaign",
+            "Create Character",
+            ShowJoinCampaignDialog,
+            ShowJoinWithCharacterDialog
+        );
+
+        InformationManager.ShowInquiry(inquiry, true);
+    }
+
+    /// <summary>
+    /// Join an existing campaign as a spectator - load host's save file.
+    /// </summary>
+    public static void ShowJoinCampaignDialog()
+    {
+        InformationManager.ShowTextInquiry(
+            new TextInquiryData(
+                "Join Co-op Campaign",
+                "Enter the host's IP address:\n\nYou'll receive the host's save file and control a party in their world.",
+                true,
+                true,
+                "Connect",
+                "Cancel",
+                OnJoinCampaignAddressEntered,
+                null,
+                false,
+                text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
+                "",
+                BannerBrosModule.Instance?.Config.LastServerAddress ?? ""
+            )
+        );
+    }
+
+    private static void OnJoinCampaignAddressEntered(string address)
+    {
+        // Parse address
+        var parts = address.Split(':');
+        var serverAddress = parts[0];
+        var serverPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
+            ? p
+            : BannerBrosModule.Instance?.Config.DefaultPort ?? 7777;
+
+        // Save for next time
+        if (BannerBrosModule.Instance != null)
+        {
+            BannerBrosModule.Instance.Config.LastServerAddress = address;
+        }
+
+        BannerBrosModule.LogMessage($"Connecting to {serverAddress}:{serverPort}...");
+        BannerBrosModule.LogMessage("You will receive the host's save file.");
+        BannerBrosModule.LogMessage("After transfer, load 'CoOp_*' from Load Game menu.");
+
+        // Connect without character creation
+        var module = BannerBrosModule.Instance;
+        if (module != null)
+        {
+            module.JoinSession(serverAddress, serverPort);
+        }
+
+        // Show instructions
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Connecting...",
+                "Connecting to host and requesting save file.\n\n" +
+                "After the transfer completes:\n" +
+                "1. Go to 'Load Game' on the main menu\n" +
+                "2. Load the save starting with 'CoOp_'\n" +
+                "3. You'll enter spectator mode automatically\n" +
+                "4. The host will assign you a party to control",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
+    }
+
+    /// <summary>
+    /// Original join flow with character creation.
+    /// </summary>
+    public static void ShowJoinWithCharacterDialog()
+    {
         // First, get the server address
         InformationManager.ShowTextInquiry(
             new TextInquiryData(

@@ -142,49 +142,72 @@ public class SaveFileTransferManager
     {
         try
         {
-            // Bannerlord save files are typically in Documents/Mount and Blade II Bannerlord/Game Saves/Native
-            var savesDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "Mount and Blade II Bannerlord",
-                "Game Saves",
-                "Native"
-            );
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            BannerBrosModule.LogMessage($"[SaveTransfer] Documents path: {documentsPath}");
 
-            if (!Directory.Exists(savesDir))
+            // Try multiple possible save locations
+            var possibleDirs = new[]
             {
-                BannerBrosModule.LogMessage($"Save directory not found: {savesDir}");
-                return null;
-            }
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves", "Native"),
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves"),
+                // Steam cloud saves location
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves", "SteamCloud"),
+            };
 
-            // Find the most recently modified save file
-            // In a real implementation, we'd track which save is currently loaded
-            var saveFiles = Directory.GetFiles(savesDir, "*.sav");
-            if (saveFiles.Length == 0)
+            foreach (var savesDir in possibleDirs)
             {
-                BannerBrosModule.LogMessage("No save files found");
-                return null;
-            }
+                BannerBrosModule.LogMessage($"[SaveTransfer] Checking: {savesDir}");
 
-            // For now, use the most recent save file
-            // TODO: Track actual loaded save name
-            string? mostRecent = null;
-            DateTime mostRecentTime = DateTime.MinValue;
-
-            foreach (var file in saveFiles)
-            {
-                var info = new FileInfo(file);
-                if (info.LastWriteTime > mostRecentTime)
+                if (!Directory.Exists(savesDir))
                 {
-                    mostRecentTime = info.LastWriteTime;
-                    mostRecent = file;
+                    BannerBrosModule.LogMessage($"[SaveTransfer] Directory does not exist");
+                    continue;
+                }
+
+                var saveFiles = Directory.GetFiles(savesDir, "*.sav");
+                BannerBrosModule.LogMessage($"[SaveTransfer] Found {saveFiles.Length} .sav files");
+
+                if (saveFiles.Length == 0)
+                    continue;
+
+                // Find the most recent save file
+                string? mostRecent = null;
+                DateTime mostRecentTime = DateTime.MinValue;
+
+                foreach (var file in saveFiles)
+                {
+                    var info = new FileInfo(file);
+                    if (info.LastWriteTime > mostRecentTime)
+                    {
+                        mostRecentTime = info.LastWriteTime;
+                        mostRecent = file;
+                    }
+                }
+
+                if (mostRecent != null)
+                {
+                    var age = DateTime.Now - mostRecentTime;
+                    BannerBrosModule.LogMessage($"[SaveTransfer] Most recent save: {Path.GetFileName(mostRecent)}");
+                    BannerBrosModule.LogMessage($"[SaveTransfer] Last modified: {mostRecentTime} ({age.TotalMinutes:F0} minutes ago)");
+
+                    // Warn if save is old
+                    if (age.TotalMinutes > 30)
+                    {
+                        BannerBrosModule.LogMessage("[SaveTransfer] WARNING: Save file is over 30 minutes old!");
+                        BannerBrosModule.LogMessage("[SaveTransfer] TIP: Save your game before clients join");
+                    }
+
+                    return mostRecent;
                 }
             }
 
-            return mostRecent;
+            BannerBrosModule.LogMessage("[SaveTransfer] ERROR: No save files found in any location!");
+            BannerBrosModule.LogMessage("[SaveTransfer] Please save your game first, then have the client reconnect.");
+            return null;
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Error finding save file: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] Error finding save file: {ex.Message}");
             return null;
         }
     }
