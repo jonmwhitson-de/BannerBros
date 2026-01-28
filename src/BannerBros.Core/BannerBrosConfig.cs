@@ -58,7 +58,7 @@ public class BannerBrosConfig
     /// When true, client debug logs are streamed to the server.
     /// Server will write them to BannerBros_ClientRemote.log.
     /// </summary>
-    public bool StreamClientLogs { get; set; } = false;
+    public bool StreamClientLogs { get; set; } = true;
 
     public static BannerBrosConfig Load()
     {
