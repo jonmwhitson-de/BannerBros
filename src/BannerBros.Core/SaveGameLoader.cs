@@ -60,10 +60,63 @@ public static class SaveGameLoader
     {
         try
         {
-            var mbSaveLoadType = typeof(MBSubModuleBase).Assembly.GetType("TaleWorlds.MountAndBlade.MBSaveLoad");
+            // Search all assemblies for MBSaveLoad type
+            Type? mbSaveLoadType = null;
+
+            // Try known locations first
+            mbSaveLoadType = typeof(MBSubModuleBase).Assembly.GetType("TaleWorlds.MountAndBlade.MBSaveLoad");
+
+            // If not found, search all loaded assemblies
             if (mbSaveLoadType == null)
             {
-                BannerBrosModule.LogMessage("[SaveLoader] MBSaveLoad type not found");
+                BannerBrosModule.LogMessage("[SaveLoader] MBSaveLoad not in MBSubModuleBase assembly, searching all assemblies...");
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try
+                    {
+                        var type = assembly.GetType("TaleWorlds.MountAndBlade.MBSaveLoad");
+                        if (type != null)
+                        {
+                            mbSaveLoadType = type;
+                            BannerBrosModule.LogMessage($"[SaveLoader] Found MBSaveLoad in: {assembly.GetName().Name}");
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // Try alternate type names
+            if (mbSaveLoadType == null)
+            {
+                var typeNames = new[] { "MBSaveLoad", "SaveLoad", "SaveManager", "GameSaveManager" };
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (mbSaveLoadType != null) break;
+                    try
+                    {
+                        foreach (var type in assembly.GetTypes())
+                        {
+                            if (typeNames.Contains(type.Name) && type.Namespace?.Contains("TaleWorlds") == true)
+                            {
+                                BannerBrosModule.LogMessage($"[SaveLoader] Found candidate: {type.FullName}");
+                                // Check if it has GetSaveFiles method
+                                if (type.GetMethod("GetSaveFiles", BindingFlags.Public | BindingFlags.Static) != null)
+                                {
+                                    mbSaveLoadType = type;
+                                    BannerBrosModule.LogMessage($"[SaveLoader] Using: {type.FullName}");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            if (mbSaveLoadType == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] MBSaveLoad type not found in any assembly");
                 return null;
             }
 
@@ -91,7 +144,6 @@ public static class SaveGameLoader
 
             // List all saves for debugging
             BannerBrosModule.LogMessage($"[SaveLoader] Looking for: '{saveName}'");
-            BannerBrosModule.LogMessage("[SaveLoader] Available saves:");
 
             object? foundSave = null;
             int count = 0;
@@ -99,24 +151,23 @@ public static class SaveGameLoader
             {
                 var nameProperty = saveFile.GetType().GetProperty("Name");
                 var name = nameProperty?.GetValue(saveFile) as string ?? "(unknown)";
-                BannerBrosModule.LogMessage($"[SaveLoader]   - {name}");
                 count++;
 
                 if (name.Equals(saveName, StringComparison.OrdinalIgnoreCase))
                 {
                     foundSave = saveFile;
-                    BannerBrosModule.LogMessage($"[SaveLoader] *** MATCH FOUND ***");
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found matching save: {name}");
                 }
             }
 
-            BannerBrosModule.LogMessage($"[SaveLoader] Total saves: {count}");
+            BannerBrosModule.LogMessage($"[SaveLoader] Scanned {count} saves");
 
             if (foundSave != null)
             {
                 return foundSave;
             }
 
-            BannerBrosModule.LogMessage($"[SaveLoader] Save '{saveName}' not in list");
+            BannerBrosModule.LogMessage($"[SaveLoader] Save '{saveName}' not in list - may need refresh");
         }
         catch (Exception ex)
         {
