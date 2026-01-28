@@ -1040,9 +1040,9 @@ public static class SaveGameLoader
                 }
             }
 
-            // Try multiple load methods - prioritize LoadGameAction (which actually loads)
-            // TryLoadSave might have precondition checks that silently fail
-            var methodNames = new[] { "LoadGameAction", "LoadSaveGame", "TryLoadSave" };
+            // Try TryLoadSave FIRST - it handles module mismatch dialogs properly
+            // LoadGameAction skips dialogs and may crash on module mismatch
+            var methodNames = new[] { "TryLoadSave", "LoadGameAction", "LoadSaveGame" };
             var methods = allMethods
                 .Where(m => methodNames.Contains(m.Name))
                 .OrderBy(m => Array.IndexOf(methodNames, m.Name)) // Priority order
@@ -1056,6 +1056,10 @@ public static class SaveGameLoader
                 var paramStr = string.Join(", ", parameters.Select(p => p.ParameterType.Name));
                 BannerBrosModule.LogMessage($"[SaveLoader] Trying {method.Name}({paramStr})...");
 
+                // TryLoadSave handles everything including dialogs - use simple callbacks
+                // LoadGameAction needs us to manually start the game
+                bool isTryLoadSave = method.Name == "TryLoadSave";
+
                 try
                 {
                     object? result = null;
@@ -1068,8 +1072,9 @@ public static class SaveGameLoader
                     else if (parameters.Length == 2)
                     {
                         // Second param is usually Action<LoadGameResult> callback
-                        // Try with actual callback first
-                        var callback = CreateLoadResultCallback(parameters[1].ParameterType);
+                        var callback = isTryLoadSave
+                            ? CreateSimpleLogCallback(parameters[1].ParameterType, "TryLoadSave callback")
+                            : CreateLoadResultCallback(parameters[1].ParameterType);
                         result = method.Invoke(null, new object?[] { saveFileInfo, callback });
                         BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(2 params) called! Result: {result}");
                         return true;
@@ -1077,11 +1082,23 @@ public static class SaveGameLoader
                     else if (parameters.Length == 3)
                     {
                         // TryLoadSave(SaveGameFileInfo, Action<LoadResult>, Action) or similar
-                        // The callbacks might be REQUIRED for the load to proceed!
-                        var callback1 = CreateLoadResultCallback(parameters[1].ParameterType);
-                        Action callback2 = () => BannerBrosModule.LogMessage("[SaveLoader] OnLoadComplete callback fired!");
+                        object? callback1;
+                        Action callback2;
 
-                        BannerBrosModule.LogMessage($"[SaveLoader] Calling with actual callbacks...");
+                        if (isTryLoadSave)
+                        {
+                            // TryLoadSave handles the game start - just log
+                            callback1 = CreateSimpleLogCallback(parameters[1].ParameterType, "TryLoadSave result");
+                            callback2 = () => BannerBrosModule.LogMessage("[SaveLoader] TryLoadSave OnComplete - game should be starting!");
+                        }
+                        else
+                        {
+                            // LoadGameAction - we need to start the game manually
+                            callback1 = CreateLoadResultCallback(parameters[1].ParameterType);
+                            callback2 = () => BannerBrosModule.LogMessage("[SaveLoader] LoadGameAction OnComplete callback fired!");
+                        }
+
+                        BannerBrosModule.LogMessage($"[SaveLoader] Calling {method.Name} with callbacks...");
                         result = method.Invoke(null, new object?[] { saveFileInfo, callback1, callback2 });
                         BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(3 params) called! Result: {result}");
 
@@ -1106,6 +1123,43 @@ public static class SaveGameLoader
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Creates a simple callback that just logs - doesn't try to start the game.
+    /// Used for TryLoadSave which handles game start internally.
+    /// </summary>
+    private static object? CreateSimpleLogCallback(Type parameterType, string context)
+    {
+        try
+        {
+            if (!parameterType.IsGenericType || parameterType.GetGenericTypeDefinition() != typeof(Action<>))
+            {
+                return null;
+            }
+
+            var genericArg = parameterType.GetGenericArguments()[0];
+
+            // Create: (result) => BannerBrosModule.LogMessage($"[SaveLoader] {context}: {result}")
+            var param = System.Linq.Expressions.Expression.Parameter(genericArg, "result");
+            var logMethod = typeof(BannerBrosModule).GetMethod("LogMessage", BindingFlags.Public | BindingFlags.Static);
+
+            var prefix = System.Linq.Expressions.Expression.Constant($"[SaveLoader] {context}: ");
+            var toStringMethod = typeof(object).GetMethod("ToString");
+            var resultToString = System.Linq.Expressions.Expression.Call(
+                System.Linq.Expressions.Expression.Convert(param, typeof(object)),
+                toStringMethod!);
+            var concatMethod = typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) });
+            var message = System.Linq.Expressions.Expression.Call(concatMethod!, prefix, resultToString);
+            var callLog = System.Linq.Expressions.Expression.Call(logMethod!, message);
+
+            var lambda = System.Linq.Expressions.Expression.Lambda(parameterType, callLog, param);
+            return lambda.Compile();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
