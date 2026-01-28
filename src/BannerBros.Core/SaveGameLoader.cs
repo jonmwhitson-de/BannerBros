@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using TaleWorlds.Core;
@@ -17,6 +18,9 @@ public static class SaveGameLoader
         var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
         BannerBrosModule.LogMessage($"[SaveLoader] === LOADING SAVE: {saveName} ===");
         BannerBrosModule.LogMessage($"[SaveLoader] Full path: {savePath}");
+
+        // Force refresh the save list to include newly written file
+        ForceRefreshSaveList();
 
         // First try to load directly by path (faster, works for newly written files)
         if (TryLoadDirectlyByPath(savePath))
@@ -65,6 +69,81 @@ public static class SaveGameLoader
     }
 
     /// <summary>
+    /// Forces the game to refresh its internal save file list.
+    /// </summary>
+    private static void ForceRefreshSaveList()
+    {
+        try
+        {
+            BannerBrosModule.LogMessage("[SaveLoader] Forcing save list refresh...");
+
+            // Find MBSaveLoad type
+            Type? mbSaveLoadType = typeof(MBSubModuleBase).Assembly.GetType("TaleWorlds.MountAndBlade.MBSaveLoad");
+            if (mbSaveLoadType == null)
+            {
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try
+                    {
+                        var type = assembly.GetType("TaleWorlds.MountAndBlade.MBSaveLoad")
+                                   ?? assembly.GetType("TaleWorlds.Core.MBSaveLoad");
+                        if (type != null)
+                        {
+                            mbSaveLoadType = type;
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            if (mbSaveLoadType == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] MBSaveLoad not found for refresh");
+                return;
+            }
+
+            // Try multiple refresh methods
+            var methodNames = new[] { "RefreshSaveFiles", "InitializeSaveSystem", "Initialize", "Refresh" };
+            foreach (var methodName in methodNames)
+            {
+                var method = mbSaveLoadType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
+                if (method != null)
+                {
+                    try
+                    {
+                        var parameters = method.GetParameters();
+                        if (parameters.Length == 0)
+                        {
+                            method.Invoke(null, null);
+                            BannerBrosModule.LogMessage($"[SaveLoader] Called {methodName}()");
+                        }
+                        else
+                        {
+                            // Try with default args
+                            var args = new object?[parameters.Length];
+                            for (int i = 0; i < parameters.Length; i++)
+                            {
+                                args[i] = parameters[i].HasDefaultValue ? parameters[i].DefaultValue : null;
+                            }
+                            method.Invoke(null, args);
+                            BannerBrosModule.LogMessage($"[SaveLoader] Called {methodName}(defaults)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader] {methodName} failed: {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] Refresh error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Try to load save directly by file path, bypassing the game's save list.
     /// </summary>
     private static bool TryLoadDirectlyByPath(string savePath)
@@ -73,7 +152,17 @@ public static class SaveGameLoader
         {
             BannerBrosModule.LogMessage("[SaveLoader] Trying direct path load...");
 
-            // Look for SaveGameFileInfo constructor that takes a path
+            // Verify the file exists and is valid
+            if (!System.IO.File.Exists(savePath))
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] ERROR: File does not exist: {savePath}");
+                return false;
+            }
+
+            var fileInfo = new System.IO.FileInfo(savePath);
+            BannerBrosModule.LogMessage($"[SaveLoader] File size: {fileInfo.Length} bytes, modified: {fileInfo.LastWriteTime}");
+
+            // Look for SaveGameFileInfo type
             var saveFileInfoType = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
                 .FirstOrDefault(t => t.Name == "SaveGameFileInfo");
@@ -82,43 +171,118 @@ public static class SaveGameLoader
             {
                 BannerBrosModule.LogMessage($"[SaveLoader] Found SaveGameFileInfo: {saveFileInfoType.FullName}");
 
-                // Try to create from path
-                var ctors = saveFileInfoType.GetConstructors();
+                // Log all properties for understanding the type
+                var allProps = saveFileInfoType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                BannerBrosModule.LogMessage($"[SaveLoader] SaveGameFileInfo properties:");
+                foreach (var prop in allProps)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} ({prop.PropertyType.Name}) CanWrite={prop.CanWrite}");
+                }
+
+                // Log all constructors
+                var ctors = saveFileInfoType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                BannerBrosModule.LogMessage($"[SaveLoader] SaveGameFileInfo has {ctors.Length} constructors:");
+
+                object? createdSaveInfo = null;
+
                 foreach (var ctor in ctors)
                 {
                     var ctorParams = ctor.GetParameters();
-                    BannerBrosModule.LogMessage($"[SaveLoader] Ctor: ({string.Join(", ", ctorParams.Select(p => p.ParameterType.Name))})");
+                    BannerBrosModule.LogMessage($"[SaveLoader]   Ctor: ({string.Join(", ", ctorParams.Select(p => $"{p.ParameterType.Name} {p.Name}"))})");
 
-                    // Look for ctor that takes string (path) or FileInfo
-                    if (ctorParams.Length == 1 && ctorParams[0].ParameterType == typeof(string))
+                    // Try ctor with FileInfo parameter
+                    if (ctorParams.Length == 1 && ctorParams[0].ParameterType == typeof(System.IO.FileInfo))
                     {
-                        var saveInfo = ctor.Invoke(new object[] { savePath });
-                        if (saveInfo != null)
+                        try
                         {
-                            BannerBrosModule.LogMessage("[SaveLoader] Created SaveGameFileInfo from path!");
-                            if (TryLoadViaSandBoxHelper(saveInfo))
+                            var saveInfo = ctor.Invoke(new object[] { fileInfo });
+                            if (saveInfo != null)
                             {
-                                return true;
+                                BannerBrosModule.LogMessage("[SaveLoader] Created SaveGameFileInfo from FileInfo!");
+                                if (TryLoadViaSandBoxHelper(saveInfo))
+                                {
+                                    return true;
+                                }
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader] FileInfo ctor failed: {ex.Message}");
+                        }
+                    }
+                    // Try ctor with string parameter
+                    else if (ctorParams.Length == 1 && ctorParams[0].ParameterType == typeof(string))
+                    {
+                        try
+                        {
+                            var saveInfo = ctor.Invoke(new object[] { savePath });
+                            if (saveInfo != null)
+                            {
+                                BannerBrosModule.LogMessage("[SaveLoader] Created SaveGameFileInfo from path string!");
+                                if (TryLoadViaSandBoxHelper(saveInfo))
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader] String ctor failed: {ex.Message}");
+                        }
+                    }
+                    // Try parameterless ctor and set properties manually
+                    else if (ctorParams.Length == 0 && createdSaveInfo == null)
+                    {
+                        try
+                        {
+                            createdSaveInfo = ctor.Invoke(null);
+                            BannerBrosModule.LogMessage("[SaveLoader] Created empty SaveGameFileInfo, will try to populate");
+                        }
+                        catch (Exception ex)
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader] Parameterless ctor failed: {ex.Message}");
                         }
                     }
                 }
 
+                // If we created an empty SaveGameFileInfo, try to populate it
+                if (createdSaveInfo != null)
+                {
+                    if (TryPopulateSaveGameFileInfo(createdSaveInfo, savePath, fileInfo))
+                    {
+                        BannerBrosModule.LogMessage("[SaveLoader] Populated SaveGameFileInfo, attempting load...");
+                        if (TryLoadViaSandBoxHelper(createdSaveInfo))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                // Log all static methods for debugging
+                var staticMethods = saveFileInfoType.GetMethods(BindingFlags.Public | BindingFlags.Static);
+                BannerBrosModule.LogMessage($"[SaveLoader] SaveGameFileInfo has {staticMethods.Length} static methods:");
+                foreach (var m in staticMethods.Where(x => x.DeclaringType == saveFileInfoType))
+                {
+                    var p = m.GetParameters();
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+                }
+
                 // Try static Create/FromPath methods
-                var createMethods = saveFileInfoType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                    .Where(m => m.Name.Contains("Create") || m.Name.Contains("FromPath") || m.Name.Contains("FromFile"))
+                var createMethods = saveFileInfoType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic)
+                    .Where(m => m.Name.Contains("Create") || m.Name.Contains("FromPath") || m.Name.Contains("FromFile") || m.Name.Contains("Load"))
                     .ToArray();
 
                 foreach (var method in createMethods)
                 {
-                    BannerBrosModule.LogMessage($"[SaveLoader] Trying {method.Name}...");
                     var methodParams = method.GetParameters();
-                    if (methodParams.Length >= 1 && methodParams[0].ParameterType == typeof(string))
+                    BannerBrosModule.LogMessage($"[SaveLoader] Trying SaveGameFileInfo.{method.Name}({string.Join(", ", methodParams.Select(p => p.ParameterType.Name))})...");
+
+                    if (methodParams.Length >= 1 && (methodParams[0].ParameterType == typeof(string) || methodParams[0].ParameterType == typeof(System.IO.FileInfo)))
                     {
                         try
                         {
                             var args = new object?[methodParams.Length];
-                            args[0] = savePath;
+                            args[0] = methodParams[0].ParameterType == typeof(string) ? savePath : (object)fileInfo;
                             for (int i = 1; i < methodParams.Length; i++)
                             {
                                 args[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : null;
@@ -141,49 +305,308 @@ public static class SaveGameLoader
                 }
             }
 
-            // Try SandBoxSaveHelper with path directly
+            // Try SandBoxSaveHelper methods
+            if (TryLoadViaSandBoxHelperByPath(savePath))
+            {
+                return true;
+            }
+
+            // Try SandBox.SaveLoad class
+            if (TryLoadViaSandBoxSaveLoad(savePath))
+            {
+                return true;
+            }
+
+            // Try to start a campaign game manager with the save
+            if (TryLoadViaCampaignGameManager(savePath))
+            {
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] Direct path load error: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveLoader] Stack: {ex.StackTrace}");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Try to populate an empty SaveGameFileInfo with the file information.
+    /// </summary>
+    private static bool TryPopulateSaveGameFileInfo(object saveInfo, string savePath, System.IO.FileInfo fileInfo)
+    {
+        try
+        {
+            var type = saveInfo.GetType();
+            var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
+            bool anySet = false;
+
+            // Try to set Name property
+            var nameProp = type.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
+            if (nameProp != null && nameProp.CanWrite)
+            {
+                nameProp.SetValue(saveInfo, saveName);
+                BannerBrosModule.LogMessage($"[SaveLoader] Set Name = {saveName}");
+                anySet = true;
+            }
+            else
+            {
+                // Try setting via backing field
+                var nameField = type.GetField("_name", BindingFlags.NonPublic | BindingFlags.Instance)
+                             ?? type.GetField("<Name>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (nameField != null)
+                {
+                    nameField.SetValue(saveInfo, saveName);
+                    BannerBrosModule.LogMessage($"[SaveLoader] Set Name field = {saveName}");
+                    anySet = true;
+                }
+            }
+
+            // Try to set various path-related properties
+            var pathProps = new[] { "FilePath", "Path", "SavePath", "FullPath", "File" };
+            foreach (var propName in pathProps)
+            {
+                var prop = type.GetProperty(propName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (prop != null && prop.CanWrite)
+                {
+                    if (prop.PropertyType == typeof(string))
+                    {
+                        prop.SetValue(saveInfo, savePath);
+                        BannerBrosModule.LogMessage($"[SaveLoader] Set {propName} = {savePath}");
+                        anySet = true;
+                    }
+                    else if (prop.PropertyType == typeof(System.IO.FileInfo))
+                    {
+                        prop.SetValue(saveInfo, fileInfo);
+                        BannerBrosModule.LogMessage($"[SaveLoader] Set {propName} = FileInfo");
+                        anySet = true;
+                    }
+                }
+            }
+
+            // Try fields too
+            var fields = type.GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var field in fields)
+            {
+                var fieldNameLower = field.Name.ToLowerInvariant();
+                if (fieldNameLower.Contains("path") || fieldNameLower.Contains("file"))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found field: {field.Name} ({field.FieldType.Name})");
+                    if (field.FieldType == typeof(string))
+                    {
+                        field.SetValue(saveInfo, savePath);
+                        BannerBrosModule.LogMessage($"[SaveLoader] Set field {field.Name} = path");
+                        anySet = true;
+                    }
+                    else if (field.FieldType == typeof(System.IO.FileInfo))
+                    {
+                        field.SetValue(saveInfo, fileInfo);
+                        BannerBrosModule.LogMessage($"[SaveLoader] Set field {field.Name} = FileInfo");
+                        anySet = true;
+                    }
+                }
+            }
+
+            // Log what the object looks like now
+            BannerBrosModule.LogMessage("[SaveLoader] SaveGameFileInfo state after population:");
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                try
+                {
+                    var val = prop.GetValue(saveInfo);
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = {val ?? "(null)"}");
+                }
+                catch { }
+            }
+
+            return anySet;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] PopulateSaveGameFileInfo error: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Try loading via SandBoxSaveHelper with a file path directly.
+    /// </summary>
+    private static bool TryLoadViaSandBoxHelperByPath(string savePath)
+    {
+        try
+        {
             var sandboxAssembly = AppDomain.CurrentDomain.GetAssemblies()
                 .FirstOrDefault(a => a.GetName().Name == "SandBox");
 
-            if (sandboxAssembly != null)
-            {
-                var helperType = sandboxAssembly.GetType("SandBox.SandBoxSaveHelper");
-                if (helperType != null)
-                {
-                    var loadMethods = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                        .Where(m => m.Name.Contains("Load"))
-                        .ToArray();
+            if (sandboxAssembly == null) return false;
 
-                    foreach (var method in loadMethods)
+            var helperType = sandboxAssembly.GetType("SandBox.SandBoxSaveHelper");
+            if (helperType == null) return false;
+
+            // Log all methods for debugging
+            var allMethods = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
+            BannerBrosModule.LogMessage($"[SaveLoader] SandBoxSaveHelper has {allMethods.Length} methods:");
+            foreach (var m in allMethods.Where(x => x.DeclaringType == helperType))
+            {
+                var p = m.GetParameters();
+                BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+            }
+
+            // Try methods that accept string path
+            var loadMethods = allMethods.Where(m => m.Name.Contains("Load")).ToArray();
+            foreach (var method in loadMethods)
+            {
+                var methodParams = method.GetParameters();
+                if (methodParams.Length >= 1 && methodParams[0].ParameterType == typeof(string))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Trying SandBoxSaveHelper.{method.Name}(string)...");
+                    try
                     {
-                        var methodParams = method.GetParameters();
-                        if (methodParams.Length >= 1 && methodParams[0].ParameterType == typeof(string))
+                        var args = new object?[methodParams.Length];
+                        args[0] = savePath;
+                        for (int i = 1; i < methodParams.Length; i++)
                         {
-                            BannerBrosModule.LogMessage($"[SaveLoader] Trying SandBoxSaveHelper.{method.Name}(string)...");
-                            try
-                            {
-                                var args = new object?[methodParams.Length];
-                                args[0] = savePath;
-                                for (int i = 1; i < methodParams.Length; i++)
-                                {
-                                    args[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : null;
-                                }
-                                method.Invoke(null, args);
-                                BannerBrosModule.LogMessage("[SaveLoader] Direct path load initiated!");
-                                return true;
-                            }
-                            catch (Exception ex)
-                            {
-                                BannerBrosModule.LogMessage($"[SaveLoader] {method.Name} failed: {ex.Message}");
-                            }
+                            args[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : null;
                         }
+                        method.Invoke(null, args);
+                        BannerBrosModule.LogMessage("[SaveLoader] SandBoxSaveHelper path load initiated!");
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader] {method.Name} failed: {ex.InnerException?.Message ?? ex.Message}");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"[SaveLoader] Direct path load error: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveLoader] SandBoxSaveHelper path error: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Try loading via SandBox.SaveLoad class.
+    /// </summary>
+    private static bool TryLoadViaSandBoxSaveLoad(string savePath)
+    {
+        try
+        {
+            var saveLoadType = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                .FirstOrDefault(t => t.Name == "SaveLoad" && t.Namespace?.Contains("SandBox") == true);
+
+            if (saveLoadType == null) return false;
+
+            BannerBrosModule.LogMessage($"[SaveLoader] Found SandBox.SaveLoad: {saveLoadType.FullName}");
+
+            // Log all methods
+            var allMethods = saveLoadType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
+            BannerBrosModule.LogMessage($"[SaveLoader] SaveLoad has {allMethods.Length} methods:");
+            foreach (var m in allMethods.Where(x => x.DeclaringType == saveLoadType).Take(15))
+            {
+                var p = m.GetParameters();
+                BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+            }
+
+            // Try LoadGame with path
+            var loadMethods = allMethods.Where(m => m.Name.Contains("Load") || m.Name.Contains("Start")).ToArray();
+            foreach (var method in loadMethods)
+            {
+                var methodParams = method.GetParameters();
+                if (methodParams.Length >= 1 && methodParams[0].ParameterType == typeof(string))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Trying SaveLoad.{method.Name}(string)...");
+                    try
+                    {
+                        var args = new object?[methodParams.Length];
+                        args[0] = savePath;
+                        for (int i = 1; i < methodParams.Length; i++)
+                        {
+                            args[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : null;
+                        }
+                        method.Invoke(null, args);
+                        BannerBrosModule.LogMessage("[SaveLoader] SaveLoad path load initiated!");
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader] {method.Name} failed: {ex.InnerException?.Message ?? ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] SandBox.SaveLoad error: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Try loading via CampaignGameManager.
+    /// </summary>
+    private static bool TryLoadViaCampaignGameManager(string savePath)
+    {
+        try
+        {
+            var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
+
+            // Look for SandBoxSaveHelper.LoadSaveGame that might accept a name
+            var sandboxAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "SandBox");
+
+            if (sandboxAssembly != null)
+            {
+                // Try to find a way to start campaign from save file
+                var gameManagerTypes = sandboxAssembly.GetTypes()
+                    .Where(t => t.Name.Contains("GameManager") || t.Name.Contains("SaveLoad"))
+                    .ToArray();
+
+                foreach (var type in gameManagerTypes)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Checking type: {type.Name}");
+                    var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                        .Where(m => m.Name.Contains("Load") || m.Name.Contains("Start"))
+                        .Take(5)
+                        .ToArray();
+
+                    foreach (var m in methods)
+                    {
+                        var p = m.GetParameters();
+                        BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+                    }
+                }
+            }
+
+            // Try MBGameManager.StartSavedGame or similar
+            var mbGameManagerType = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                .FirstOrDefault(t => t.Name == "MBGameManager" || t.Name == "SandBoxGameManager");
+
+            if (mbGameManagerType != null)
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] Found: {mbGameManagerType.FullName}");
+
+                var startMethods = mbGameManagerType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic)
+                    .Where(m => m.Name.Contains("Start") || m.Name.Contains("Load"))
+                    .ToArray();
+
+                foreach (var method in startMethods)
+                {
+                    var methodParams = method.GetParameters();
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {method.Name}({string.Join(", ", methodParams.Select(p => $"{p.ParameterType.Name} {p.Name}"))})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] CampaignGameManager error: {ex.Message}");
         }
 
         return false;
@@ -304,21 +727,51 @@ public static class SaveGameLoader
             }
             else
             {
-                // Build args with defaults
+                // Build args with appropriate values
                 var args = new object?[getParams.Length];
                 for (int i = 0; i < getParams.Length; i++)
                 {
+                    var paramType = getParams[i].ParameterType;
+
                     if (getParams[i].HasDefaultValue)
                     {
                         args[i] = getParams[i].DefaultValue;
                     }
-                    else if (getParams[i].ParameterType == typeof(bool))
+                    else if (paramType == typeof(bool))
                     {
                         args[i] = false;
                     }
-                    else if (getParams[i].ParameterType == typeof(string))
+                    else if (paramType == typeof(string))
                     {
                         args[i] = "";
+                    }
+                    else if (paramType.Name.StartsWith("Func`"))
+                    {
+                        // Create a Func that returns true for all items (accept all saves)
+                        // The Func is likely Func<SaveGameFileInfo, bool>
+                        try
+                        {
+                            var genericArgs = paramType.GetGenericArguments();
+                            if (genericArgs.Length == 2 && genericArgs[1] == typeof(bool))
+                            {
+                                // Create: (x) => true
+                                var inputType = genericArgs[0];
+                                var param = System.Linq.Expressions.Expression.Parameter(inputType, "x");
+                                var trueExpr = System.Linq.Expressions.Expression.Constant(true);
+                                var lambda = System.Linq.Expressions.Expression.Lambda(paramType, trueExpr, param);
+                                args[i] = lambda.Compile();
+                                BannerBrosModule.LogMessage($"[SaveLoader] Created Func filter for {inputType.Name}");
+                            }
+                            else
+                            {
+                                args[i] = null;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader] Failed to create Func: {ex.Message}");
+                            args[i] = null;
+                        }
                     }
                     else
                     {
@@ -346,27 +799,64 @@ public static class SaveGameLoader
 
             object? foundSave = null;
             int count = 0;
+            var allNames = new List<string>();
+
             foreach (var saveFile in saveFilesEnumerable)
             {
-                var nameProperty = saveFile.GetType().GetProperty("Name");
+                var saveType = saveFile.GetType();
+                var nameProperty = saveType.GetProperty("Name");
                 var name = nameProperty?.GetValue(saveFile) as string ?? "(unknown)";
                 count++;
+                allNames.Add(name);
 
+                // Try exact match
                 if (name.Equals(saveName, StringComparison.OrdinalIgnoreCase))
                 {
                     foundSave = saveFile;
-                    BannerBrosModule.LogMessage($"[SaveLoader] Found matching save: {name}");
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found exact match: {name}");
+                }
+                // Try partial match (e.g., CoOp_ prefix might be stripped)
+                else if (name.Contains(saveName) || saveName.Contains(name))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found partial match: {name}");
+                    if (foundSave == null)
+                    {
+                        foundSave = saveFile;
+                    }
                 }
             }
 
-            BannerBrosModule.LogMessage($"[SaveLoader] Scanned {count} saves");
+            BannerBrosModule.LogMessage($"[SaveLoader] Scanned {count} saves total");
+            BannerBrosModule.LogMessage($"[SaveLoader] All save names: [{string.Join(", ", allNames)}]");
 
             if (foundSave != null)
             {
                 return foundSave;
             }
 
-            BannerBrosModule.LogMessage($"[SaveLoader] Save '{saveName}' not in list - may need refresh");
+            // File not in game's list - check if it exists on disk
+            BannerBrosModule.LogMessage($"[SaveLoader] Save '{saveName}' not in game's list");
+
+            // Check filesystem directly
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var possibleDirs = new[]
+            {
+                System.IO.Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves", "Native"),
+                System.IO.Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves"),
+            };
+
+            foreach (var dir in possibleDirs)
+            {
+                if (!System.IO.Directory.Exists(dir)) continue;
+                var files = System.IO.Directory.GetFiles(dir, "*.sav");
+                BannerBrosModule.LogMessage($"[SaveLoader] Directory {dir} has {files.Length} .sav files:");
+                foreach (var f in files.Take(10))
+                {
+                    var fname = System.IO.Path.GetFileNameWithoutExtension(f);
+                    var finfo = new System.IO.FileInfo(f);
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {fname} ({finfo.Length} bytes, {finfo.LastWriteTime})");
+                }
+            }
         }
         catch (Exception ex)
         {
