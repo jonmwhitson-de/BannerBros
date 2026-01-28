@@ -790,11 +790,15 @@ public class SessionManager
             {
                 DebugFileLog.Log($"Created party: {party.StringId}");
 
-                // Try to move party to client's position
+                // Try to move party to client's position using reflection for API compatibility
                 try
                 {
                     var posVec2 = new Vec2(spawnX, spawnY);
-                    party.Position2D = posVec2;
+                    var posProp = party.GetType().GetProperty("Position2D");
+                    if (posProp?.CanWrite == true)
+                    {
+                        posProp.SetValue(party, posVec2);
+                    }
                 }
                 catch (Exception ex)
                 {
