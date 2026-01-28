@@ -2,6 +2,7 @@ using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.InputSystem;
+using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
 using BannerBros.Client.UI;
 using BannerBros.Core;
@@ -145,6 +146,44 @@ public class ClientModule : MBSubModuleBase
 
         // Initialize menu extension
         MainMenuExtension.Initialize();
+
+        // Add co-op menu options using the standard Bannerlord API
+        try
+        {
+            BannerBrosModule.LogMessage("[ClientModule] Adding co-op menu options via AddInitialStateOption...");
+
+            // Host Co-op option
+            Module.CurrentModule.AddInitialStateOption(new InitialStateOption(
+                "BannerBros_Host",
+                new TextObject("Host Co-op"),
+                9001,
+                () =>
+                {
+                    BannerBrosModule.LogMessage("Host Co-op clicked");
+                    MainMenuExtension.ShowHostDialog();
+                },
+                () => (false, TextObject.Empty)
+            ));
+
+            // Join Co-op option
+            Module.CurrentModule.AddInitialStateOption(new InitialStateOption(
+                "BannerBros_Join",
+                new TextObject("Join Co-op"),
+                9002,
+                () =>
+                {
+                    BannerBrosModule.LogMessage("Join Co-op clicked");
+                    MainMenuExtension.ShowJoinDialog();
+                },
+                () => (false, TextObject.Empty)
+            ));
+
+            BannerBrosModule.LogMessage("[ClientModule] Co-op menu options added successfully");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[ClientModule] Failed to add menu options: {ex.Message}");
+        }
     }
 
     protected override void OnApplicationTick(float dt)
