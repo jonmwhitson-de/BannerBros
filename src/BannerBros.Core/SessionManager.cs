@@ -299,8 +299,12 @@ public class SessionManager
         }
 
         // Check if this player has a saved character they can reclaim
+        // BUT: if they explicitly selected a new character (exportedCharacter), don't use saved
         var savedCharacter = BannerBrosModule.Instance?.PlayerSaveData.FindCharacter(packet.PlayerName);
         bool hasValidSavedCharacter = savedCharacter != null && PlayerSaveData.IsHeroValid(savedCharacter.HeroId);
+
+        // If user explicitly selected a character, don't use saved character
+        bool useSavedCharacter = hasValidSavedCharacter && exportedCharacter == null;
 
         // Player needs character creation if:
         // - No valid saved character AND no exported character AND hasn't indicated existing
@@ -316,8 +320,8 @@ public class SessionManager
             ExistingPlayersJson = JsonConvert.SerializeObject(GetConnectedPlayerInfos())
         };
 
-        // If player has a saved character, include that info
-        if (hasValidSavedCharacter && savedCharacter != null)
+        // If player has a saved character AND didn't explicitly select a new one, include that info
+        if (useSavedCharacter && savedCharacter != null)
         {
             response.WorldStateData = JsonConvert.SerializeObject(new SavedCharacterInfo
             {
@@ -326,7 +330,11 @@ public class SessionManager
                 PartyId = savedCharacter.PartyId,
                 HeroName = GetHeroName(savedCharacter.HeroId)
             });
-            BannerBrosModule.LogMessage($"Player {packet.PlayerName} has saved character: {savedCharacter.HeroId}");
+            BannerBrosModule.LogMessage($"Player {packet.PlayerName} reclaiming saved character: {savedCharacter.HeroId}");
+        }
+        else if (exportedCharacter != null)
+        {
+            BannerBrosModule.LogMessage($"Player {packet.PlayerName} using newly selected character: {exportedCharacter.Name}");
         }
 
         // Send response first
@@ -346,8 +354,8 @@ public class SessionManager
         DebugLog.Log($"=== JOIN STARTED for {packet.PlayerName} ===");
         DebugLog.Log("MVP FLOW: Deferring hero creation until client's campaign loads");
 
-        // Check if this player has a saved character they can reclaim
-        if (hasValidSavedCharacter && savedCharacter != null)
+        // Check if this player should reclaim a saved character (only if they didn't select a new one)
+        if (useSavedCharacter && savedCharacter != null)
         {
             try
             {
@@ -357,7 +365,7 @@ public class SessionManager
                 player.PartyId = savedCharacter.PartyId;
                 player.State = PlayerState.OnMap;
                 UpdatePlayerPositionFromHero(player);
-                BannerBrosModule.LogMessage($"Reclaiming saved character: {savedCharacter.HeroId}");
+                DebugLog.Log($"Reclaiming saved character: {savedCharacter.HeroId}");
             }
             catch (Exception savedEx)
             {
@@ -365,11 +373,16 @@ public class SessionManager
                 player.State = PlayerState.InMenu;
             }
         }
+        else if (exportedCharacter != null)
+        {
+            // User explicitly selected a character - will create shadow hero when they load campaign
+            DebugLog.Log($"Using selected character: {exportedCharacter.Name}");
+            DebugLog.Log("Shadow hero will be created when client's campaign loads");
+        }
         else
         {
             // New player - they need to start a campaign, then we'll create their shadow hero
             BannerBrosModule.LogMessage($"Player {packet.PlayerName} joined - waiting for their campaign to load");
-            BannerBrosModule.LogMessage("Instruct player to start a New Campaign to join the game");
         }
 
         try
