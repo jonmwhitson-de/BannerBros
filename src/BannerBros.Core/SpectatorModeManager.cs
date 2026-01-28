@@ -2,7 +2,10 @@ using System;
 using System.Linq;
 using BannerBros.Network;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
 
 namespace BannerBros.Core;
@@ -304,16 +307,26 @@ public class SpectatorModeManager
         // Find the assigned party in the game
         try
         {
-            AssignedParty = Campaign.Current?.MobileParties
-                .FirstOrDefault(p => p.StringId == packet.PartyId);
+            // Log all parties for debugging
+            var allParties = Campaign.Current?.MobileParties?.ToList();
+            BannerBrosModule.LogMessage($"[Spectator] Looking for party '{packet.PartyId}' among {allParties?.Count ?? 0} parties");
+
+            AssignedParty = allParties?.FirstOrDefault(p => p.StringId == packet.PartyId);
+
+            // If party not found, it was created on host after save transfer - create it locally
+            if (AssignedParty == null)
+            {
+                BannerBrosModule.LogMessage($"[Spectator] Party not found in save - creating locally...");
+                AssignedParty = CreateLocalParty(packet, localPlayer);
+            }
 
             if (AssignedParty != null)
             {
                 AssignedHero = AssignedParty.LeaderHero;
-                BannerBrosModule.LogMessage($"Party assigned: {AssignedParty.Name}");
+                BannerBrosModule.LogMessage($"[Spectator] Party ready: {AssignedParty.Name} (StringId: {AssignedParty.StringId})");
 
                 // Update local player info
-                localPlayer.PartyId = packet.PartyId;
+                localPlayer.PartyId = AssignedParty.StringId; // Use actual StringId
                 localPlayer.HeroId = packet.HeroId;
                 localPlayer.ClanId = packet.ClanId;
                 localPlayer.MapPositionX = packet.MapX;
@@ -326,13 +339,134 @@ public class SpectatorModeManager
             }
             else
             {
-                BannerBrosModule.LogMessage($"Warning: Assigned party not found: {packet.PartyId}");
+                BannerBrosModule.LogMessage($"[Spectator] ERROR: Could not find or create party: {packet.PartyId}");
             }
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"Error handling party assignment: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Creates a party locally on the client side to match what host created.
+    /// This is needed because the party was created on host after save transfer.
+    /// </summary>
+    private MobileParty? CreateLocalParty(PartyAssignmentPacket packet, CoopPlayer localPlayer)
+    {
+        try
+        {
+            if (Campaign.Current == null)
+            {
+                BannerBrosModule.LogMessage("[Spectator] Cannot create party: No campaign");
+                return null;
+            }
+
+            // Get a culture
+            var culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
+                .FirstOrDefault(c => c.IsMainCulture);
+
+            if (culture == null)
+            {
+                BannerBrosModule.LogMessage("[Spectator] Cannot create party: No culture found");
+                return null;
+            }
+
+            // Find a settlement for hero creation
+            var spawnSettlement = Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
+
+            // Create clan
+            var clanId = $"coop_client_clan_{localPlayer.Name?.ToLowerInvariant().Replace(" ", "_") ?? "player"}_{DateTime.Now.Ticks}";
+            var clan = Clan.CreateClan(clanId);
+            if (clan == null)
+            {
+                BannerBrosModule.LogMessage("[Spectator] Failed to create clan");
+                return null;
+            }
+            clan.Culture = culture;
+            clan.AddRenown(50);
+
+            // Create hero
+            var hero = HeroCreator.CreateSpecialHero(
+                culture.BasicTroop,
+                spawnSettlement,
+                clan,
+                null,
+                25
+            );
+
+            if (hero == null)
+            {
+                BannerBrosModule.LogMessage("[Spectator] Failed to create hero");
+                return null;
+            }
+
+            hero.SetName(
+                new TaleWorlds.Localization.TextObject(localPlayer.Name ?? "Co-op Player"),
+                new TaleWorlds.Localization.TextObject(localPlayer.Name ?? "Co-op Player")
+            );
+
+            clan.SetLeader(hero);
+
+            // Create party - use the same ID pattern as host for matching
+            MobileParty? party = null;
+            var partyId = packet.PartyId; // Use the ID the host sent
+
+            try
+            {
+                // Try to create LordPartyComponent via reflection
+                var componentType = typeof(LordPartyComponent);
+                var createMethod = componentType.GetMethod("CreateLordPartyComponent",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+
+                if (createMethod != null)
+                {
+                    var component = createMethod.Invoke(null, new object[] { hero, hero }) as PartyComponent;
+                    if (component != null)
+                    {
+                        party = MobileParty.CreateParty(partyId, component);
+                    }
+                }
+
+                // Fallback
+                if (party == null)
+                {
+                    party = MobileParty.CreateParty(partyId, null);
+                }
+
+                if (party != null)
+                {
+                    // Initialize roster with hero
+                    var memberRoster = TroopRoster.CreateDummyTroopRoster();
+                    memberRoster.AddToCounts(hero.CharacterObject, 1);
+                    var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
+                    var posVec2 = new Vec2(packet.MapX, packet.MapY);
+
+                    party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, posVec2);
+
+                    // Configure party
+                    try { party.IsVisible = true; } catch { }
+                    try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+
+                    BannerBrosModule.LogMessage($"[Spectator] Created local party: {party.StringId} at ({packet.MapX:F1}, {packet.MapY:F1})");
+
+                    // Update AssignedPartyId to match actual StringId
+                    AssignedPartyId = party.StringId;
+
+                    return party;
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"[Spectator] Party creation error: {ex.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[Spectator] CreateLocalParty error: {ex.Message}");
+        }
+
+        return null;
     }
 
     /// <summary>

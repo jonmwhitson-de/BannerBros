@@ -1,3 +1,4 @@
+using System;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
@@ -65,24 +66,36 @@ public static class MapClickPatches
         {
             try
             {
-                if (!ShouldInterceptMovement()) return true;
-
-                // Check if this is our assigned party
-                var party = GetPartyFromAi(__instance);
+                // Log all calls in spectator mode for debugging
                 var module = BannerBrosModule.Instance;
                 var spectatorMgr = module?.SpectatorModeManager;
 
-                if (spectatorMgr?.AssignedPartyId == party?.StringId)
+                if (spectatorMgr?.IsSpectatorMode == true)
+                {
+                    var party = GetPartyFromAi(__instance);
+                    BannerBrosModule.LogMessage($"[MapClick] SetMoveGoToPoint called - Party: {party?.StringId ?? "null"}, AssignedId: {spectatorMgr.AssignedPartyId ?? "null"}");
+                }
+
+                if (!ShouldInterceptMovement()) return true;
+
+                // Check if this is our assigned party
+                var partyToCheck = GetPartyFromAi(__instance);
+
+                if (spectatorMgr?.AssignedPartyId == partyToCheck?.StringId)
                 {
                     // This is our assigned party - send command to host instead
-                    BannerBrosModule.LogMessage($"[MapClick] Intercepted move to ({point.x:F1}, {point.y:F1})");
+                    BannerBrosModule.LogMessage($"[MapClick] INTERCEPTED move to ({point.x:F1}, {point.y:F1})");
                     spectatorMgr.SendMoveCommand(point.x, point.y);
                     return false; // Don't execute local movement
                 }
+                else
+                {
+                    BannerBrosModule.LogMessage($"[MapClick] NOT intercepting - party mismatch");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // On error, allow normal behavior
+                BannerBrosModule.LogMessage($"[MapClick] Error in patch: {ex.Message}");
             }
 
             return true;
