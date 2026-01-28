@@ -1087,9 +1087,13 @@ public static class SaveGameLoader
 
                         if (isTryLoadSave)
                         {
-                            // TryLoadSave handles the game start - just log
-                            callback1 = CreateSimpleLogCallback(parameters[1].ParameterType, "TryLoadSave result");
-                            callback2 = () => BannerBrosModule.LogMessage("[SaveLoader] TryLoadSave OnComplete - game should be starting!");
+                            // TryLoadSave handles the game start internally
+                            // Pass NULL for BOTH callbacks - this lets the game
+                            // use its internal handlers that trigger the load UI
+                            // In Attempt 6, null callbacks + empty SaveGameFileInfo showed module dialog
+                            callback1 = null;
+                            callback2 = null!;
+                            BannerBrosModule.LogMessage("[SaveLoader] Using NULL callbacks for TryLoadSave to trigger internal game handlers");
                         }
                         else
                         {
