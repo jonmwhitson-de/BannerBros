@@ -805,21 +805,38 @@ public class SessionManager
             if (party != null)
             {
                 DebugFileLog.Log($"Created party: {party.StringId}");
+                DebugFileLog.Log($"Party MemberRoster count: {party.MemberRoster?.TotalManCount ?? 0}");
+                DebugFileLog.Log($"Party LeaderHero: {party.LeaderHero?.Name ?? "null"}");
 
                 // Try to move party to client's position using reflection for API compatibility
                 try
                 {
                     var posVec2 = new Vec2(spawnX, spawnY);
                     var posProp = party.GetType().GetProperty("Position2D");
+                    DebugFileLog.Log($"Position2D property: CanRead={posProp?.CanRead}, CanWrite={posProp?.CanWrite}");
+
                     if (posProp?.CanWrite == true)
                     {
                         posProp.SetValue(party, posVec2);
+                        DebugFileLog.Log($"Set Position2D to ({spawnX}, {spawnY})");
                     }
+                    else
+                    {
+                        DebugFileLog.Log("Position2D is NOT writable!");
+                    }
+
+                    // Verify position was set
+                    var actualPos = party.GetPosition2D;
+                    DebugFileLog.Log($"Party actual position: ({actualPos.x}, {actualPos.y})");
                 }
                 catch (Exception ex)
                 {
                     DebugFileLog.Log($"Failed to set party position: {ex.Message}");
                 }
+
+                // Log visibility state
+                DebugFileLog.Log($"Party IsVisible: {party.IsVisible}");
+                DebugFileLog.Log($"Party IsActive: {party.IsActive}");
             }
 
             return new SpawnResult
