@@ -68,6 +68,7 @@ public class NetworkManager : INetEventListener
         _packetProcessor.SubscribeReusable<CharacterCreationPacket, NetPeer>(_messageHandler.HandleCharacterCreation);
         _packetProcessor.SubscribeReusable<CharacterCreationResponsePacket, NetPeer>(_messageHandler.HandleCharacterCreationResponse);
         _packetProcessor.SubscribeReusable<FullStateSyncPacket, NetPeer>(_messageHandler.HandleFullStateSync);
+        _packetProcessor.SubscribeReusable<ClientCampaignReadyPacket, NetPeer>(_messageHandler.HandleClientCampaignReady);
     }
 
     public void StartHost(int port, int maxPlayers = 4)

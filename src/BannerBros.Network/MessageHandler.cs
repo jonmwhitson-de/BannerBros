@@ -24,6 +24,7 @@ public class MessageHandler
     public event Action<CharacterCreationPacket, int>? OnCharacterCreationReceived; // packet, peerId
     public event Action<CharacterCreationResponsePacket>? OnCharacterCreationResponseReceived;
     public event Action<FullStateSyncPacket>? OnFullStateSyncReceived;
+    public event Action<ClientCampaignReadyPacket, int>? OnClientCampaignReadyReceived; // packet, peerId
 
     public MessageHandler(NetworkManager networkManager)
     {
@@ -181,5 +182,15 @@ public class MessageHandler
         if (_networkManager.IsHost) return;
 
         OnFullStateSyncReceived?.Invoke(packet);
+    }
+
+    public void HandleClientCampaignReady(ClientCampaignReadyPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Client campaign ready: {packet.HeroName} (player {packet.PlayerId})");
+
+        // Only host processes campaign ready notifications
+        if (!_networkManager.IsHost) return;
+
+        OnClientCampaignReadyReceived?.Invoke(packet, peer.Id);
     }
 }

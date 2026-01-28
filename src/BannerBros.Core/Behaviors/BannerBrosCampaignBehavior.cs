@@ -91,6 +91,11 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         {
                             LinkHostToMainHero();
                         }
+                        else
+                        {
+                            // Client: notify host that our campaign has loaded
+                            SendCampaignReadyToHost();
+                        }
                     }
                 }
                 return;
@@ -140,6 +145,72 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Called on client when their campaign loads - notifies host so shadow hero can be created.
+    /// </summary>
+    private void SendCampaignReadyToHost()
+    {
+        try
+        {
+            var module = BannerBrosModule.Instance;
+            var networkManager = NetworkManager.Instance;
+            if (module == null || networkManager == null || !networkManager.IsRunning) return;
+
+            var localPlayer = module.PlayerManager.GetLocalPlayer();
+            if (localPlayer == null)
+            {
+                BannerBrosModule.LogMessage("Error: No local player found when sending campaign ready");
+                return;
+            }
+
+            // Get info about our MainHero
+            var hero = Hero.MainHero;
+            var party = MobileParty.MainParty;
+
+            if (hero == null)
+            {
+                BannerBrosModule.LogMessage("Error: No MainHero found when sending campaign ready");
+                return;
+            }
+
+            var pos = party?.GetPosition2D ?? new TaleWorlds.Library.Vec2(0, 0);
+
+            var packet = new ClientCampaignReadyPacket
+            {
+                PlayerId = localPlayer.NetworkId,
+                HeroName = hero.Name?.ToString() ?? localPlayer.Name,
+                HeroId = hero.StringId,
+                ClanId = hero.Clan?.StringId ?? "",
+                CultureId = hero.Culture?.StringId ?? "",
+                MapX = pos.x,
+                MapY = pos.y,
+                IsFemale = hero.IsFemale,
+                Age = (int)hero.Age
+            };
+
+            // Try to get body properties
+            try
+            {
+                packet.BodyPropertiesXml = hero.BodyProperties.ToString();
+            }
+            catch { }
+
+            BannerBrosModule.LogMessage($"Sending campaign ready: {packet.HeroName} at ({packet.MapX}, {packet.MapY})");
+            networkManager.SendToServer(packet);
+
+            // Update local player info
+            localPlayer.HeroId = hero.StringId;
+            localPlayer.ClanId = hero.Clan?.StringId;
+            localPlayer.PartyId = party?.StringId;
+            localPlayer.MapPositionX = pos.x;
+            localPlayer.MapPositionY = pos.y;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"SendCampaignReadyToHost error: {ex.Message}");
         }
     }
 

@@ -86,6 +86,7 @@ public class SessionManager
         networkManager.Messages.OnFullStateSyncReceived += HandleFullStateSync;
         networkManager.Messages.OnPlayerStateReceived += HandlePlayerStateUpdate;
         networkManager.Messages.OnSessionEventReceived += HandleSessionEvent;
+        networkManager.Messages.OnClientCampaignReadyReceived += HandleClientCampaignReady;
 
         networkManager.PeerConnected += OnPeerConnected;
         networkManager.PeerDisconnected += OnPeerDisconnected;
@@ -111,6 +112,7 @@ public class SessionManager
         networkManager.Messages.OnFullStateSyncReceived -= HandleFullStateSync;
         networkManager.Messages.OnPlayerStateReceived -= HandlePlayerStateUpdate;
         networkManager.Messages.OnSessionEventReceived -= HandleSessionEvent;
+        networkManager.Messages.OnClientCampaignReadyReceived -= HandleClientCampaignReady;
 
         networkManager.PeerConnected -= OnPeerConnected;
         networkManager.PeerDisconnected -= OnPeerDisconnected;
@@ -356,86 +358,33 @@ public class SessionManager
         BannerBrosModule.LogMessage($"Sending JoinResponse to peer {peerId}: PlayerId={playerId}, RequiresCharCreate={requiresCharacterCreation}");
         networkManager?.SendTo(peerId, response);
 
-        // Create player entry
+        // Create player entry - mark as "pending campaign load"
+        // Hero creation is deferred until client's campaign loads and they send ClientCampaignReadyPacket
         var player = new CoopPlayer
         {
             NetworkId = playerId,
             Name = packet.PlayerName,
             IsHost = false,
-            State = requiresCharacterCreation ? PlayerState.InMenu : PlayerState.OnMap
+            State = PlayerState.InMenu  // Will change to OnMap when their campaign loads
         };
-
-        // DEBUG FLAG: Set to true to skip hero/party creation and test join without it
-        const bool SKIP_HERO_CREATION_FOR_DEBUG = false;
 
         // Clear debug log at start of join
         DebugFileLog.Clear();
         DebugFileLog.Log($"=== JOIN STARTED for {packet.PlayerName} ===");
+        DebugFileLog.Log("MVP FLOW: Deferring hero creation until client's campaign loads");
 
-        // Handle the different cases:
-        if (exportedCharacter != null && !SKIP_HERO_CREATION_FOR_DEBUG)
+        // Check if this player has a saved character they can reclaim
+        if (hasValidSavedCharacter && savedCharacter != null)
         {
             try
             {
-                // Client sent full character data - create hero from it
-                BannerBrosModule.LogMessage($"Creating hero from exported character data...");
-                var result = SpawnHeroFromExportedCharacter(exportedCharacter, player);
-
-                if (result.Success)
-                {
-                    player.HeroId = result.HeroId;
-                    player.ClanId = result.ClanId;
-                    player.PartyId = result.PartyId;
-                    player.MapPositionX = result.SpawnX;
-                    player.MapPositionY = result.SpawnY;
-                    player.State = PlayerState.OnMap;
-
-                    // Register for future reconnection
-                    try
-                    {
-                        BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
-                            player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
-                    }
-                    catch (Exception regEx)
-                    {
-                        BannerBrosModule.LogMessage($"Warning: Failed to register player: {regEx.Message}");
-                    }
-
-                    // Send success response
-                    try
-                    {
-                        SendCharacterCreationResponse(peerId, playerId, true, null,
-                            result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
-                    }
-                    catch (Exception respEx)
-                    {
-                        BannerBrosModule.LogMessage($"Warning: Failed to send creation response: {respEx.Message}");
-                    }
-                }
-                else
-                {
-                    BannerBrosModule.LogMessage($"Failed to create hero: {result.ErrorMessage}");
-                    // Fall back to requiring character creation
-                    player.State = PlayerState.InMenu;
-                }
-            }
-            catch (Exception heroEx)
-            {
-                BannerBrosModule.LogMessage($"ERROR creating hero: {heroEx.Message}");
-                BannerBrosModule.LogMessage($"Stack: {heroEx.StackTrace}");
-                player.State = PlayerState.InMenu;
-            }
-        }
-        else if (hasValidSavedCharacter && savedCharacter != null && !SKIP_HERO_CREATION_FOR_DEBUG)
-        {
-            try
-            {
-                // Reclaiming saved character
+                // Reclaiming saved character - they already have a hero on this save
                 player.HeroId = savedCharacter.HeroId;
                 player.ClanId = savedCharacter.ClanId;
                 player.PartyId = savedCharacter.PartyId;
                 player.State = PlayerState.OnMap;
                 UpdatePlayerPositionFromHero(player);
+                BannerBrosModule.LogMessage($"Reclaiming saved character: {savedCharacter.HeroId}");
             }
             catch (Exception savedEx)
             {
@@ -443,12 +392,11 @@ public class SessionManager
                 player.State = PlayerState.InMenu;
             }
         }
-
-        // When debug skipping hero creation, just mark player as in menu (spectator mode)
-        if (SKIP_HERO_CREATION_FOR_DEBUG)
+        else
         {
-            BannerBrosModule.LogMessage($"DEBUG: Skipping hero creation - player joining as spectator");
-            player.State = PlayerState.InMenu;
+            // New player - they need to start a campaign, then we'll create their shadow hero
+            BannerBrosModule.LogMessage($"Player {packet.PlayerName} joined - waiting for their campaign to load");
+            BannerBrosModule.LogMessage("Instruct player to start a New Campaign to join the game");
         }
 
         try
@@ -681,6 +629,237 @@ public class SessionManager
             BannerBrosModule.LogMessage($"Character creation failed: {ex.Message}");
             SendCharacterCreationResponse(peerId, packet.PlayerId, false, $"Error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Called on host when a client's campaign has loaded and they're ready to play.
+    /// This is when we create the shadow hero/party on the host's side.
+    /// </summary>
+    private void HandleClientCampaignReady(ClientCampaignReadyPacket packet, int peerId)
+    {
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null || !networkManager.IsHost) return;
+
+        BannerBrosModule.LogMessage($"Client campaign ready: {packet.HeroName} (player {packet.PlayerId})");
+        DebugFileLog.Log($"=== CLIENT CAMPAIGN READY: {packet.HeroName} ===");
+
+        var player = _playerManager.GetPlayer(packet.PlayerId);
+        if (player == null)
+        {
+            BannerBrosModule.LogMessage($"Player {packet.PlayerId} not found!");
+            return;
+        }
+
+        try
+        {
+            // Now create the shadow hero/party on host's side
+            var result = CreateShadowHeroForClient(packet, player);
+
+            if (result.Success)
+            {
+                player.HeroId = result.HeroId;
+                player.ClanId = result.ClanId;
+                player.PartyId = result.PartyId;
+                player.MapPositionX = result.SpawnX;
+                player.MapPositionY = result.SpawnY;
+                player.State = PlayerState.OnMap;
+
+                // Register for future reconnection
+                BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
+                    player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
+
+                // Send success response
+                SendCharacterCreationResponse(peerId, packet.PlayerId, true, null,
+                    result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+
+                // Notify all players
+                BroadcastPlayerStateUpdate(player);
+
+                BannerBrosModule.LogMessage($"Shadow hero created for {packet.HeroName}");
+            }
+            else
+            {
+                BannerBrosModule.LogMessage($"Failed to create shadow hero: {result.ErrorMessage}");
+                SendCharacterCreationResponse(peerId, packet.PlayerId, false, result.ErrorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"HandleClientCampaignReady error: {ex.Message}");
+            DebugFileLog.Log($"HandleClientCampaignReady error: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+
+    /// <summary>
+    /// Creates a shadow hero/party on host's side to represent the client.
+    /// </summary>
+    private SpawnResult CreateShadowHeroForClient(ClientCampaignReadyPacket packet, CoopPlayer player)
+    {
+        if (Campaign.Current == null)
+        {
+            return new SpawnResult { Success = false, ErrorMessage = "No active campaign" };
+        }
+
+        try
+        {
+            DebugFileLog.Log($"Creating shadow hero for {packet.HeroName}");
+
+            // Get the culture
+            var culture = MBObjectManager.Instance.GetObject<CultureObject>(packet.CultureId);
+            if (culture == null)
+            {
+                culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
+                    .FirstOrDefault(c => c.IsMainCulture);
+            }
+
+            if (culture == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "No valid culture found" };
+            }
+
+            // Find spawn settlement near client's position, or use culture default
+            var spawnSettlement = Campaign.Current.Settlements
+                .Where(s => s.IsTown)
+                .OrderBy(s => {
+                    var pos = s.GatePosition;
+                    var dx = pos.X - packet.MapX;
+                    var dy = pos.Y - packet.MapY;
+                    return dx * dx + dy * dy;
+                })
+                .FirstOrDefault();
+
+            if (spawnSettlement == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "No valid spawn location found" };
+            }
+
+            // Create a NEW clan for this player (don't reuse existing clans)
+            var clan = CreateNewClanForPlayer(culture, packet.HeroName);
+            if (clan == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "Failed to create clan" };
+            }
+            DebugFileLog.Log($"Created clan: {clan.StringId}");
+
+            // Create the hero
+            var characterTemplate = culture.BasicTroop;
+            var hero = HeroCreator.CreateSpecialHero(
+                characterTemplate,
+                spawnSettlement,
+                clan,
+                null,
+                packet.Age > 0 ? packet.Age : 25
+            );
+
+            if (hero == null)
+            {
+                return new SpawnResult { Success = false, ErrorMessage = "Failed to create hero" };
+            }
+            DebugFileLog.Log($"Created hero: {hero.StringId}");
+
+            // Set hero name
+            hero.SetName(new TaleWorlds.Localization.TextObject(packet.HeroName),
+                         new TaleWorlds.Localization.TextObject(packet.HeroName));
+
+            // Set gender if needed
+            if (hero.IsFemale != packet.IsFemale)
+            {
+                try
+                {
+                    var isFemaleField = typeof(Hero).GetField("_isFemale",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    isFemaleField?.SetValue(hero, packet.IsFemale);
+                }
+                catch { }
+            }
+
+            // Make clan leader
+            if (clan.Leader != hero)
+            {
+                clan.SetLeader(hero);
+            }
+
+            // Get spawn position - use client's position
+            var spawnX = packet.MapX;
+            var spawnY = packet.MapY;
+
+            // Create party
+            MobileParty? party = CreatePlayerParty(hero, clan, spawnSettlement);
+
+            if (party != null)
+            {
+                DebugFileLog.Log($"Created party: {party.StringId}");
+
+                // Try to move party to client's position
+                try
+                {
+                    var posVec2 = new Vec2(spawnX, spawnY);
+                    party.Position2D = posVec2;
+                }
+                catch (Exception ex)
+                {
+                    DebugFileLog.Log($"Failed to set party position: {ex.Message}");
+                }
+            }
+
+            return new SpawnResult
+            {
+                Success = true,
+                HeroId = hero.StringId,
+                PartyId = party?.StringId ?? "",
+                ClanId = clan.StringId,
+                SpawnX = spawnX,
+                SpawnY = spawnY
+            };
+        }
+        catch (Exception ex)
+        {
+            DebugFileLog.Log($"CreateShadowHeroForClient error: {ex.Message}\n{ex.StackTrace}");
+            return new SpawnResult { Success = false, ErrorMessage = ex.Message };
+        }
+    }
+
+    /// <summary>
+    /// Creates a completely new clan for a player (doesn't reuse existing clans).
+    /// </summary>
+    private Clan? CreateNewClanForPlayer(CultureObject culture, string playerName)
+    {
+        try
+        {
+            var clanId = $"coop_clan_{playerName.ToLowerInvariant().Replace(" ", "_")}_{DateTime.Now.Ticks}";
+
+            // Use Clan.CreateClan to create a new clan
+            var newClan = Clan.CreateClan(clanId);
+
+            if (newClan != null)
+            {
+                newClan.Culture = culture;
+                newClan.AddRenown(50);
+
+                // Set clan name
+                var clanName = $"{playerName}'s Warband";
+                try
+                {
+                    // Try to set the name via reflection if needed
+                    var nameField = typeof(Clan).GetProperty("Name");
+                    if (nameField?.CanWrite == true)
+                    {
+                        nameField.SetValue(newClan, new TaleWorlds.Localization.TextObject(clanName));
+                    }
+                }
+                catch { }
+
+                BannerBrosModule.LogMessage($"Created new clan: {clanId}");
+                return newClan;
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"CreateNewClanForPlayer failed: {ex.Message}");
+        }
+
+        // Fallback to existing method if creation fails
+        return CreatePlayerClan(culture, playerName);
     }
 
     private SpawnResult SpawnPlayerHero(CharacterCreationPacket packet, CoopPlayer player)

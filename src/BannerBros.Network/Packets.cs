@@ -259,3 +259,21 @@ public class SavedCharacterInfo
     public string PartyId { get; set; } = "";
     public string HeroName { get; set; } = "";
 }
+
+/// <summary>
+/// Sent by client when their campaign has loaded and they're ready to play.
+/// Contains their actual MainHero info so host can create a shadow hero.
+/// </summary>
+public class ClientCampaignReadyPacket
+{
+    public int PlayerId { get; set; }
+    public string HeroName { get; set; } = "";
+    public string HeroId { get; set; } = "";
+    public string ClanId { get; set; } = "";
+    public string CultureId { get; set; } = "";
+    public float MapX { get; set; }
+    public float MapY { get; set; }
+    public bool IsFemale { get; set; }
+    public int Age { get; set; }
+    public string BodyPropertiesXml { get; set; } = "";
+}
