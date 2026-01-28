@@ -1224,6 +1224,15 @@ public static class SaveGameLoader
             if (successProp != null && (bool)(successProp.GetValue(result) ?? false))
             {
                 BannerBrosModule.LogMessage($"[SaveLoader] Load successful! Attempting to start the game...");
+
+                // BEST APPROACH: Create SandBoxGameManager with LoadResult constructor
+                if (TryStartWithLoadResultConstructor(result))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Game start initiated via LoadResult constructor!");
+                    return;
+                }
+
+                // Fallback: Try manual initialization
                 TryStartLoadedGame(result);
             }
 
@@ -1232,6 +1241,125 @@ public static class SaveGameLoader
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[SaveLoader] Error logging LoadResult: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates SandBoxGameManager with LoadResult constructor and starts the game.
+    /// This is the cleanest approach - lets the game handle all initialization.
+    /// </summary>
+    private static bool TryStartWithLoadResultConstructor(object loadResult)
+    {
+        try
+        {
+            BannerBrosModule.LogMessage("[SaveLoader] Trying SandBoxGameManager(LoadResult) constructor...");
+
+            var sandboxAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "SandBox");
+
+            if (sandboxAssembly == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] SandBox assembly not found");
+                return false;
+            }
+
+            var gameManagerType = sandboxAssembly.GetType("SandBox.SandBoxGameManager");
+            if (gameManagerType == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] SandBoxGameManager not found");
+                return false;
+            }
+
+            // Find the constructor that takes LoadResult
+            var loadResultType = loadResult.GetType();
+            var ctor = gameManagerType.GetConstructor(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                null, new[] { loadResultType }, null);
+
+            if (ctor == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] Ctor(LoadResult) not found, trying base type...");
+
+                // Try with base type (LoadResult might be a derived type)
+                var baseType = loadResultType.BaseType;
+                while (baseType != null && ctor == null)
+                {
+                    ctor = gameManagerType.GetConstructor(
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                        null, new[] { baseType }, null);
+                    baseType = baseType.BaseType;
+                }
+            }
+
+            if (ctor == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] Could not find LoadResult constructor");
+                return false;
+            }
+
+            BannerBrosModule.LogMessage($"[SaveLoader] Found constructor: {ctor}");
+            BannerBrosModule.LogMessage("[SaveLoader] Creating SandBoxGameManager with LoadResult...");
+
+            var sandBoxGameManager = ctor.Invoke(new[] { loadResult });
+
+            if (sandBoxGameManager == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] Failed to create SandBoxGameManager");
+                return false;
+            }
+
+            BannerBrosModule.LogMessage("[SaveLoader] SandBoxGameManager created successfully!");
+
+            // Now call MBGameManager.StartNewGame(sandBoxGameManager)
+            var mbGameManagerType = typeof(MBSubModuleBase).Assembly.GetType("TaleWorlds.MountAndBlade.MBGameManager");
+            if (mbGameManagerType == null)
+            {
+                mbGameManagerType = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                    .FirstOrDefault(t => t.Name == "MBGameManager");
+            }
+
+            if (mbGameManagerType == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] MBGameManager not found");
+                return false;
+            }
+
+            var startNewGameMethod = mbGameManagerType.GetMethod("StartNewGame",
+                BindingFlags.Public | BindingFlags.Static,
+                null, new[] { mbGameManagerType }, null);
+
+            if (startNewGameMethod == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] StartNewGame(MBGameManager) not found");
+
+                // List all static methods
+                var staticMethods = mbGameManagerType.GetMethods(BindingFlags.Public | BindingFlags.Static);
+                BannerBrosModule.LogMessage($"[SaveLoader] MBGameManager static methods:");
+                foreach (var m in staticMethods.Where(x => x.DeclaringType == mbGameManagerType))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
+                }
+                return false;
+            }
+
+            BannerBrosModule.LogMessage("[SaveLoader] Calling MBGameManager.StartNewGame(SandBoxGameManager)...");
+            startNewGameMethod.Invoke(null, new[] { sandBoxGameManager });
+            BannerBrosModule.LogMessage("[SaveLoader] *** GAME STARTING! ***");
+
+            return true;
+        }
+        catch (TargetInvocationException tie)
+        {
+            var inner = tie.InnerException;
+            BannerBrosModule.LogMessage($"[SaveLoader] TryStartWithLoadResultConstructor FAILED: {inner?.GetType().Name}: {inner?.Message}");
+            BannerBrosModule.LogMessage($"[SaveLoader] Inner stack: {inner?.StackTrace?.Split('\n').FirstOrDefault()}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] TryStartWithLoadResultConstructor error: {ex.Message}");
+            return false;
         }
     }
 
