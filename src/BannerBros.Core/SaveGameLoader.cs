@@ -1125,30 +1125,21 @@ public static class SaveGameLoader
             var genericArg = parameterType.GetGenericArguments()[0];
             BannerBrosModule.LogMessage($"[SaveLoader] Creating callback for Action<{genericArg.Name}>");
 
-            // Create a lambda that logs the result
-            // We use Expression trees to create a typed delegate
-            var param = System.Linq.Expressions.Expression.Parameter(genericArg, "result");
-
-            // Create the body: BannerBrosModule.LogMessage($"[SaveLoader] Load callback received: {result}")
-            var logMethod = typeof(BannerBrosModule).GetMethod("LogMessage", BindingFlags.Public | BindingFlags.Static);
-            if (logMethod == null)
+            // Create a delegate that calls our detailed logging method
+            // We use a wrapper that takes object and casts it
+            var callbackMethod = typeof(SaveGameLoader).GetMethod("LogLoadResult", BindingFlags.NonPublic | BindingFlags.Static);
+            if (callbackMethod == null)
             {
-                BannerBrosModule.LogMessage("[SaveLoader] LogMessage method not found");
+                BannerBrosModule.LogMessage("[SaveLoader] LogLoadResult method not found");
                 return null;
             }
 
-            // Build: "[SaveLoader] Load callback received: " + result.ToString()
-            var prefixExpr = System.Linq.Expressions.Expression.Constant("[SaveLoader] Load callback received: ");
-            var toStringMethod = typeof(object).GetMethod("ToString");
-            var resultToString = System.Linq.Expressions.Expression.Call(
-                System.Linq.Expressions.Expression.Convert(param, typeof(object)),
-                toStringMethod!);
-            var concatMethod = typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) });
-            var messageExpr = System.Linq.Expressions.Expression.Call(concatMethod!, prefixExpr, resultToString);
+            // Build: LogLoadResult(result)
+            var param = System.Linq.Expressions.Expression.Parameter(genericArg, "result");
+            var convertedParam = System.Linq.Expressions.Expression.Convert(param, typeof(object));
+            var callExpr = System.Linq.Expressions.Expression.Call(callbackMethod, convertedParam);
 
-            var callLogExpr = System.Linq.Expressions.Expression.Call(logMethod, messageExpr);
-
-            var lambda = System.Linq.Expressions.Expression.Lambda(parameterType, callLogExpr, param);
+            var lambda = System.Linq.Expressions.Expression.Lambda(parameterType, callExpr, param);
             var callback = lambda.Compile();
 
             BannerBrosModule.LogMessage($"[SaveLoader] Created callback delegate successfully");
@@ -1158,6 +1149,82 @@ public static class SaveGameLoader
         {
             BannerBrosModule.LogMessage($"[SaveLoader] Failed to create callback: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Logs detailed information about a LoadResult object.
+    /// </summary>
+    private static void LogLoadResult(object result)
+    {
+        try
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] === LOAD RESULT RECEIVED ===");
+            BannerBrosModule.LogMessage($"[SaveLoader] Type: {result?.GetType().FullName ?? "(null)"}");
+
+            if (result == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] Result is null!");
+                return;
+            }
+
+            var type = result.GetType();
+
+            // Log all properties
+            var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            BannerBrosModule.LogMessage($"[SaveLoader] Properties ({props.Length}):");
+            foreach (var prop in props)
+            {
+                try
+                {
+                    var val = prop.GetValue(result);
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = {val ?? "(null)"}");
+                }
+                catch (Exception ex)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = (error: {ex.Message})");
+                }
+            }
+
+            // Log all fields
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            BannerBrosModule.LogMessage($"[SaveLoader] Fields ({fields.Length}):");
+            foreach (var field in fields)
+            {
+                try
+                {
+                    var val = field.GetValue(result);
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {field.Name} = {val ?? "(null)"}");
+                }
+                catch (Exception ex)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {field.Name} = (error: {ex.Message})");
+                }
+            }
+
+            // Check for common success/error indicators
+            var successProp = type.GetProperty("Successful") ?? type.GetProperty("Success") ?? type.GetProperty("IsSuccess");
+            if (successProp != null)
+            {
+                var success = successProp.GetValue(result);
+                BannerBrosModule.LogMessage($"[SaveLoader] *** SUCCESS STATUS: {success} ***");
+            }
+
+            var errorProp = type.GetProperty("ErrorMessage") ?? type.GetProperty("Error") ?? type.GetProperty("Message");
+            if (errorProp != null)
+            {
+                var error = errorProp.GetValue(result);
+                if (error != null && !string.IsNullOrEmpty(error.ToString()))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] *** ERROR: {error} ***");
+                }
+            }
+
+            BannerBrosModule.LogMessage($"[SaveLoader] === END LOAD RESULT ===");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] Error logging LoadResult: {ex.Message}");
         }
     }
 

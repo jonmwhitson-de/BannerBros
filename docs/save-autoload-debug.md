@@ -175,19 +175,52 @@ Client receives save file from host but cannot auto-load it into the game. The g
 
 ### Attempt 10: Pass actual callbacks + check GetIsDisabledWithReason
 **Date:** 2026-01-28
+**Commit:** b736be7
+**Result:** ⚠️ Partial - LoadGameAction called, callback fired, but no game load
+**Details:**
+- Confirmed all 7 SandBoxSaveHelper methods available (including LoadGameAction!)
+- `GetIsDisabledWithReason` returned `False` - save is NOT disabled
+- `LoadGameAction` was called successfully
+- **Callback WAS fired!** - received `TaleWorlds.SaveSystem.Load.LoadResult`
+- But we only logged the type name, not the contents
+
+**Log evidence:**
+```
+[SaveLoader] SandBoxSaveHelper ALL methods (7):
+[SaveLoader]   add_OnStateChange(Action`1)
+[SaveLoader]   remove_OnStateChange(Action`1)
+[SaveLoader]   TryLoadSave(SaveGameFileInfo, Action`1, Action)
+[SaveLoader]   CheckMetaDataCompatibilityErrors(MetaData)
+[SaveLoader]   GetIsDisabledWithReason(SaveGameFileInfo, TextObject&)
+[SaveLoader]   GetModuleNameFromModuleId(String)
+[SaveLoader]   LoadGameAction(SaveGameFileInfo, Action`1, Action)
+[SaveLoader] GetIsDisabledWithReason returned: False
+[SaveLoader] Found 2 load methods matching our targets
+[SaveLoader] Trying LoadGameAction(SaveGameFileInfo, Action`1, Action)...
+[SaveLoader] Creating callback for Action<LoadResult>
+[SaveLoader] Created callback delegate successfully
+[SaveLoader] Calling with actual callbacks...
+[SaveLoader] Load callback received: TaleWorlds.SaveSystem.Load.LoadResult
+[SaveLoader] LoadGameAction(3 params) called! Result:
+[AutoLoad] Save loading initiated!
+... (nothing happens, state syncs continue)
+```
+
+---
+
+### Attempt 11: Inspect LoadResult contents
+**Date:** 2026-01-28
 **Commit:** (pending)
 **Result:** 🔄 Pending
 **Details:**
-- Hypothesis: Passing `null` for callback params prevents load from proceeding
-- Create actual `Action<T>` callbacks via Expression trees
-- Log ALL SandBoxSaveHelper methods (not just load methods)
-- Call `GetIsDisabledWithReason` to check if save is blocked
-- Check why only TryLoadSave found when LoadGameAction should exist
+- The LoadResult object contains success/error information
+- Need to inspect all properties and fields of LoadResult
+- May reveal why load doesn't proceed (success=false, error message, etc.)
 
 **Changes:**
-- Added `CreateLoadResultCallback()` to build typed delegates
-- Added check for `GetIsDisabledWithReason` before attempting load
-- Log all methods on SandBoxSaveHelper class
+- Added `LogLoadResult()` method to dump all LoadResult properties/fields
+- Check for `Successful`, `Success`, `IsSuccess` properties
+- Check for `ErrorMessage`, `Error`, `Message` properties
 
 ---
 
