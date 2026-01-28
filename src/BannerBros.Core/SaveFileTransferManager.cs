@@ -116,6 +116,13 @@ public class SaveFileTransferManager
 
         try
         {
+            // Auto-save before transferring to ensure client gets fresh state
+            BannerBrosModule.LogMessage("[SaveTransfer] HOST: Auto-saving before transfer...");
+            TriggerQuickSave();
+
+            // Small delay to ensure save completes (save is async)
+            System.Threading.Thread.Sleep(500);
+
             // Get current save file path
             var savePath = GetCurrentSavePath();
             BannerBrosModule.LogMessage($"[SaveTransfer] HOST: Found save file: {savePath ?? "NULL"}");
@@ -123,6 +130,7 @@ public class SaveFileTransferManager
             if (string.IsNullOrEmpty(savePath) || !File.Exists(savePath))
             {
                 BannerBrosModule.LogMessage("[SaveTransfer] HOST ERROR: No save file found to transfer!");
+                BannerBrosModule.LogMessage("[SaveTransfer] HOST: Please save your game manually, then have client reconnect");
                 return;
             }
 
@@ -132,6 +140,56 @@ public class SaveFileTransferManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[SaveTransfer] HOST ERROR: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Triggers a quicksave on the host to ensure fresh save for transfer.
+    /// </summary>
+    private void TriggerQuickSave()
+    {
+        try
+        {
+            var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+            if (campaign == null)
+            {
+                BannerBrosModule.LogMessage("[SaveTransfer] Cannot quicksave: No active campaign");
+                return;
+            }
+
+            // Try Campaign.Current.SaveHandler.QuickSaveCurrentGame() via reflection
+            var saveHandler = campaign.GetType().GetProperty("SaveHandler")?.GetValue(campaign);
+            if (saveHandler != null)
+            {
+                var quickSaveMethod = saveHandler.GetType().GetMethod("QuickSaveCurrentGame");
+                if (quickSaveMethod != null)
+                {
+                    quickSaveMethod.Invoke(saveHandler, null);
+                    BannerBrosModule.LogMessage("[SaveTransfer] Quicksave triggered via SaveHandler");
+                    return;
+                }
+            }
+
+            // Alternative: Try CampaignSaveSystemClass (older API)
+            var saveSystemType = typeof(TaleWorlds.CampaignSystem.Campaign).Assembly
+                .GetType("TaleWorlds.CampaignSystem.CampaignSaveSystem");
+            if (saveSystemType != null)
+            {
+                var quickSaveMethod = saveSystemType.GetMethod("QuickSave",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (quickSaveMethod != null)
+                {
+                    quickSaveMethod.Invoke(null, null);
+                    BannerBrosModule.LogMessage("[SaveTransfer] Quicksave triggered via CampaignSaveSystem");
+                    return;
+                }
+            }
+
+            BannerBrosModule.LogMessage("[SaveTransfer] WARNING: Could not trigger quicksave - using existing save");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Quicksave error (non-fatal): {ex.Message}");
         }
     }
 

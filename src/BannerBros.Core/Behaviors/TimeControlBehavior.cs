@@ -29,16 +29,51 @@ public class TimeControlBehavior : CampaignBehaviorBase
 
             if (Campaign.Current == null) return;
 
+            // Check if client is in spectator mode - freeze time to prevent divergence
+            if (!module.IsHost && module.SpectatorModeManager?.IsSpectatorMode == true)
+            {
+                FreezeClientTime();
+                return;
+            }
+
             // Get host's configured time multiplier
             _hostTimeMultiplier = module.Config.TimeSpeedMultiplier;
             _hostTimeMultiplier = Math.Max(0.5f, Math.Min(4.0f, _hostTimeMultiplier));
 
-            // Force time to always run at constant rate
-            ForceConstantTimeFlow();
+            // Force time to always run at constant rate (host only)
+            if (module.IsHost)
+            {
+                ForceConstantTimeFlow();
+            }
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"TimeControl OnTick error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Freezes campaign time on client to prevent world divergence.
+    /// The client's world is just a "viewer" - all state comes from host.
+    /// </summary>
+    private void FreezeClientTime()
+    {
+        var campaign = Campaign.Current;
+        if (campaign == null) return;
+
+        // Stop time on client - their world is frozen
+        try
+        {
+            campaign.TimeControlMode = CampaignTimeControlMode.Stop;
+        }
+        catch
+        {
+            // Fallback: try setting time speed to 0
+            try
+            {
+                campaign.SpeedUpMultiplier = 0f;
+            }
+            catch { }
         }
     }
 
