@@ -302,10 +302,86 @@ public class BannerBrosModule : MBSubModuleBase
     {
         LogMessage($"Save file ready at: {savePath}");
         PendingSaveFilePath = savePath;
-        LogMessage("Please load the co-op save from the Load Game menu");
 
-        // TODO: Auto-load the save file if possible
-        // For now, user must manually load it
+        // Attempt auto-load after a small delay for file system to settle
+        LogMessage("Attempting to auto-load save file...");
+
+        System.Threading.Tasks.Task.Run(async () =>
+        {
+            await System.Threading.Tasks.Task.Delay(500);
+
+            // Must run on main thread via game's action queue
+            try
+            {
+                // Try to queue on main thread
+                var utilitiesType = typeof(TaleWorlds.Engine.Utilities);
+                var enqueueMethod = utilitiesType.GetMethod("EnqueueAction",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+                if (enqueueMethod != null)
+                {
+                    enqueueMethod.Invoke(null, new object[] { (Action)(() => TryAutoLoadSave(savePath)) });
+                }
+                else
+                {
+                    // Fallback: try directly (may cause threading issues)
+                    TryAutoLoadSave(savePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error queuing auto-load: {ex.Message}");
+                ShowManualLoadInstructions(savePath);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Attempts to auto-load the save file.
+    /// </summary>
+    private void TryAutoLoadSave(string savePath)
+    {
+        try
+        {
+            if (SaveGameLoader.LoadSaveFile(savePath))
+            {
+                LogMessage("Save file auto-load initiated!");
+            }
+            else
+            {
+                LogMessage("Auto-load failed - showing manual instructions");
+                ShowManualLoadInstructions(savePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"Auto-load error: {ex.Message}");
+            ShowManualLoadInstructions(savePath);
+        }
+    }
+
+    /// <summary>
+    /// Shows instructions for manual save loading when auto-load fails.
+    /// </summary>
+    private void ShowManualLoadInstructions(string savePath)
+    {
+        var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Load Save Manually",
+                $"Auto-load not available. Please:\n\n" +
+                $"1. Go to 'Load Game' on the main menu\n" +
+                $"2. Load the save named '{saveName}'\n" +
+                $"3. You'll enter spectator mode automatically",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
     }
 
     /// <summary>

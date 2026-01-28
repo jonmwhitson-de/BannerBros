@@ -127,10 +127,62 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 _worldSyncTimer = 0;
                 SyncWorldState();
             }
+
+            // Client in spectator mode: update camera to follow assigned party
+            if (!module.IsHost && module.SpectatorModeManager?.IsSpectatorMode == true)
+            {
+                module.SpectatorModeManager.UpdateCameraFollow(dt);
+            }
+
+            // Ensure all co-op player parties are visible on the map
+            EnsureCoopPartiesVisible();
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"OnTick error: {ex.Message}");
+        }
+    }
+
+    private float _visibilityCheckTimer = 0;
+    private const float VisibilityCheckInterval = 1.0f;
+
+    /// <summary>
+    /// Ensures all co-op player parties are visible on the campaign map.
+    /// </summary>
+    private void EnsureCoopPartiesVisible()
+    {
+        _visibilityCheckTimer += SyncInterval;
+        if (_visibilityCheckTimer < VisibilityCheckInterval) return;
+        _visibilityCheckTimer = 0;
+
+        var module = BannerBrosModule.Instance;
+        if (module?.IsConnected != true) return;
+
+        foreach (var player in module.PlayerManager.Players.Values.ToList())
+        {
+            if (string.IsNullOrEmpty(player.PartyId)) continue;
+
+            try
+            {
+                var party = Campaign.Current?.MobileParties
+                    .FirstOrDefault(p => p.StringId == player.PartyId);
+
+                if (party != null)
+                {
+                    // Ensure party is visible
+                    if (!party.IsVisible)
+                    {
+                        try { party.IsVisible = true; }
+                        catch { }
+                    }
+
+                    // Update player position from party position
+                    var pos = party.GetPosition2D;
+                    player.MapPositionX = pos.x;
+                    player.MapPositionY = pos.y;
+                }
+            }
+            catch { }
         }
     }
 

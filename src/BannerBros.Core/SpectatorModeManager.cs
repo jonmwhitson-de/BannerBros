@@ -414,21 +414,34 @@ public class SpectatorModeManager
 
             try
             {
-                // Try to create LordPartyComponent via reflection
-                var componentType = typeof(LordPartyComponent);
-                var createMethod = componentType.GetMethod("CreateLordPartyComponent",
-                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                // Try to create LordPartyComponent via reflection (avoids direct type reference)
+                var componentType = typeof(MobileParty).Assembly.GetType("TaleWorlds.CampaignSystem.Party.PartyComponents.LordPartyComponent");
+                object? component = null;
 
-                if (createMethod != null)
+                if (componentType != null)
                 {
-                    var component = createMethod.Invoke(null, new object[] { hero, hero }) as PartyComponent;
-                    if (component != null)
+                    var createMethod = componentType.GetMethod("CreateLordPartyComponent",
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+
+                    if (createMethod != null)
                     {
-                        party = MobileParty.CreateParty(partyId, component);
+                        component = createMethod.Invoke(null, new object[] { hero, hero });
                     }
                 }
 
-                // Fallback
+                // Create party with or without component
+                if (component != null)
+                {
+                    // Use reflection to call CreateParty with the component
+                    var createPartyMethod = typeof(MobileParty).GetMethod("CreateParty",
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                    if (createPartyMethod != null)
+                    {
+                        party = createPartyMethod.Invoke(null, new object[] { partyId, component }) as MobileParty;
+                    }
+                }
+
+                // Fallback - create without component
                 if (party == null)
                 {
                     party = MobileParty.CreateParty(partyId, null);
@@ -440,9 +453,51 @@ public class SpectatorModeManager
                     var memberRoster = TroopRoster.CreateDummyTroopRoster();
                     memberRoster.AddToCounts(hero.CharacterObject, 1);
                     var prisonerRoster = TroopRoster.CreateDummyTroopRoster();
-                    var posVec2 = new Vec2(packet.MapX, packet.MapY);
 
-                    party.InitializeMobilePartyAtPosition(memberRoster, prisonerRoster, posVec2);
+                    // Use reflection to call InitializeMobilePartyAtPosition with correct types
+                    try
+                    {
+                        var initMethod = typeof(MobileParty).GetMethod("InitializeMobilePartyAtPosition",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                        if (initMethod != null)
+                        {
+                            // Check parameter types and convert Vec2 if needed
+                            var parameters = initMethod.GetParameters();
+                            object posParam;
+                            if (parameters.Length >= 3 && parameters[2].ParameterType.Name == "Vec2")
+                            {
+                                posParam = new Vec2(packet.MapX, packet.MapY);
+                            }
+                            else
+                            {
+                                // Try to create CampaignVec2 via reflection
+                                var campaignVec2Type = typeof(Campaign).Assembly.GetType("TaleWorlds.CampaignSystem.CampaignVec2");
+                                if (campaignVec2Type != null)
+                                {
+                                    posParam = Activator.CreateInstance(campaignVec2Type, packet.MapX, packet.MapY)!;
+                                }
+                                else
+                                {
+                                    posParam = new Vec2(packet.MapX, packet.MapY);
+                                }
+                            }
+                            initMethod.Invoke(party, new object[] { memberRoster, prisonerRoster, posParam });
+                        }
+                    }
+                    catch (Exception initEx)
+                    {
+                        BannerBrosModule.LogMessage($"[Spectator] InitializeMobilePartyAtPosition error: {initEx.Message}");
+                        // Try direct position set as fallback
+                        try
+                        {
+                            var posProp = party.GetType().GetProperty("Position2D");
+                            if (posProp?.CanWrite == true)
+                            {
+                                posProp.SetValue(party, new Vec2(packet.MapX, packet.MapY));
+                            }
+                        }
+                        catch { }
+                    }
 
                     // Configure party
                     try { party.IsVisible = true; } catch { }
@@ -469,6 +524,9 @@ public class SpectatorModeManager
         return null;
     }
 
+    private float _cameraUpdateTimer = 0;
+    private const float CameraUpdateInterval = 0.5f;
+
     /// <summary>
     /// Centers the camera on the assigned party.
     /// </summary>
@@ -476,20 +534,177 @@ public class SpectatorModeManager
     {
         try
         {
-            // Try to center the map camera on our assigned party
-            // This is tricky because the game camera normally follows MainParty
-            // We may need to use reflection or find a campaign camera API
-
             var pos = party.GetPosition2D;
-            BannerBrosModule.LogMessage($"Camera should focus on ({pos.x}, {pos.y})");
+            BannerBrosModule.LogMessage($"[Camera] Centering on party at ({pos.x:F1}, {pos.y:F1})");
 
-            // TODO: Actually move camera - may need MapScreen access
-            // For now, just log the position
+            // Method 1: Try MapScreen.FastMoveCameraToPosition
+            if (TryCenterViaMapScreen(pos))
+            {
+                BannerBrosModule.LogMessage("[Camera] Centered via MapScreen");
+                return;
+            }
+
+            // Method 2: Try Campaign.CameraFollowParty
+            if (TryCenterViaCampaign(party))
+            {
+                BannerBrosModule.LogMessage("[Camera] Set follow target via Campaign");
+                return;
+            }
+
+            // Method 3: Try MapCameraView
+            if (TryCenterViaMapCameraView(pos))
+            {
+                BannerBrosModule.LogMessage("[Camera] Centered via MapCameraView");
+                return;
+            }
+
+            BannerBrosModule.LogMessage("[Camera] Could not center camera automatically - use WASD to navigate");
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Error centering camera: {ex.Message}");
+            BannerBrosModule.LogMessage($"[Camera] Error: {ex.Message}");
         }
+    }
+
+    private bool TryCenterViaMapScreen(Vec2 pos)
+    {
+        try
+        {
+            // Find MapScreen type in loaded assemblies
+            var mapScreenType = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a =>
+                {
+                    try { return a.GetTypes(); }
+                    catch { return Array.Empty<Type>(); }
+                })
+                .FirstOrDefault(t => t.Name == "MapScreen");
+
+            if (mapScreenType == null) return false;
+
+            // Get Instance property
+            var instanceProp = mapScreenType.GetProperty("Instance",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+            var mapScreen = instanceProp?.GetValue(null);
+            if (mapScreen == null) return false;
+
+            // Try FastMoveCameraToPosition
+            var moveMethod = mapScreenType.GetMethod("FastMoveCameraToPosition",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+
+            if (moveMethod != null)
+            {
+                moveMethod.Invoke(mapScreen, new object[] { pos });
+                return true;
+            }
+
+            // Try SetCameraPosition
+            var setCamMethod = mapScreenType.GetMethod("SetCameraPosition",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            if (setCamMethod != null)
+            {
+                setCamMethod.Invoke(mapScreen, new object[] { pos });
+                return true;
+            }
+
+            // Try TeleportCameraToPosition
+            var teleportMethod = mapScreenType.GetMethod("TeleportCameraToPosition",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            if (teleportMethod != null)
+            {
+                teleportMethod.Invoke(mapScreen, new object[] { pos });
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    private bool TryCenterViaCampaign(MobileParty party)
+    {
+        try
+        {
+            var campaign = Campaign.Current;
+            if (campaign == null) return false;
+
+            // Try to set the camera follow target
+            var followProp = typeof(Campaign).GetProperty("CameraFollowParty",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            if (followProp?.CanWrite == true)
+            {
+                followProp.SetValue(campaign, party);
+                return true;
+            }
+
+            // Try SetCameraFollowMode
+            var setFollowMethod = typeof(Campaign).GetMethod("SetCameraFollowMode",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            if (setFollowMethod != null)
+            {
+                setFollowMethod.Invoke(campaign, new object[] { party });
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    private bool TryCenterViaMapCameraView(Vec2 pos)
+    {
+        try
+        {
+            // Find MapCameraView in loaded assemblies
+            var viewType = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a =>
+                {
+                    try { return a.GetTypes(); }
+                    catch { return Array.Empty<Type>(); }
+                })
+                .FirstOrDefault(t => t.Name == "MapCameraView" || t.Name == "CampaignMapView");
+
+            if (viewType == null) return false;
+
+            // Look for static accessor
+            var instanceProp = viewType.GetProperty("Instance",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+            var view = instanceProp?.GetValue(null);
+            if (view == null) return false;
+
+            // Try to set target position
+            var setTargetMethod = viewType.GetMethod("SetTarget",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            if (setTargetMethod != null)
+            {
+                setTargetMethod.Invoke(view, new object[] { pos });
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Call this periodically to keep camera following assigned party.
+    /// </summary>
+    public void UpdateCameraFollow(float dt)
+    {
+        if (!IsSpectatorMode || AssignedParty == null) return;
+
+        _cameraUpdateTimer += dt;
+        if (_cameraUpdateTimer < CameraUpdateInterval) return;
+        _cameraUpdateTimer = 0;
+
+        // Re-center camera periodically
+        CenterCameraOnParty(AssignedParty);
     }
 
     /// <summary>

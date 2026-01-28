@@ -111,37 +111,16 @@ public static class MainMenuExtension
 
     public static void ShowJoinDialog()
     {
-        // Show options: Join existing campaign (spectator) or create new character
-        var inquiry = new InquiryData(
-            "Join Co-op Session",
-            "Choose how to join:\n\n" +
-            "• Join Campaign - Connect and load the host's save file (recommended)\n" +
-            "• Create Character - Go through character creation first",
-            true,
-            true,
-            "Join Campaign",
-            "Create Character",
-            ShowJoinCampaignDialog,
-            ShowJoinWithCharacterDialog
-        );
-
-        InformationManager.ShowInquiry(inquiry, true);
-    }
-
-    /// <summary>
-    /// Join an existing campaign as a spectator - load host's save file.
-    /// </summary>
-    public static void ShowJoinCampaignDialog()
-    {
+        // Simplified flow: Go directly to IP entry
         InformationManager.ShowTextInquiry(
             new TextInquiryData(
-                "Join Co-op Campaign",
-                "Enter the host's IP address:\n\nYou'll receive the host's save file and control a party in their world.",
+                "Join Co-op Session",
+                "Enter the host's IP address:\n\nExample: 192.168.1.100 or 192.168.1.100:7777",
                 true,
                 true,
                 "Connect",
                 "Cancel",
-                OnJoinCampaignAddressEntered,
+                OnJoinAddressEntered,
                 null,
                 false,
                 text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
@@ -151,12 +130,12 @@ public static class MainMenuExtension
         );
     }
 
-    private static void OnJoinCampaignAddressEntered(string address)
+    private static void OnJoinAddressEntered(string address)
     {
         // Parse address
         var parts = address.Split(':');
-        var serverAddress = parts[0];
-        var serverPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
+        _pendingServerAddress = parts[0];
+        _pendingServerPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
             ? p
             : BannerBrosModule.Instance?.Config.DefaultPort ?? 7777;
 
@@ -166,27 +145,106 @@ public static class MainMenuExtension
             BannerBrosModule.Instance.Config.LastServerAddress = address;
         }
 
-        BannerBrosModule.LogMessage($"Connecting to {serverAddress}:{serverPort}...");
-        BannerBrosModule.LogMessage("You will receive the host's save file.");
-        BannerBrosModule.LogMessage("After transfer, load 'CoOp_*' from Load Game menu.");
+        // Check for saved characters
+        var savedFiles = ExportedCharacter.GetSavedCharacterFiles();
+        if (savedFiles.Count > 0)
+        {
+            ShowCharacterListForJoin(savedFiles);
+        }
+        else
+        {
+            // No saved characters - show option to create one
+            ShowNoCharacterDialog();
+        }
+    }
 
-        // Connect without character creation
+    private static void ShowCharacterListForJoin(List<string> savedFiles)
+    {
+        var elements = new List<InquiryElement>();
+        foreach (var file in savedFiles)
+        {
+            var character = ExportedCharacter.LoadFromFile(file);
+            if (character != null)
+            {
+                var desc = $"{character.CultureId} - Created {character.CreatedAt:MMM dd, yyyy}";
+                elements.Add(new InquiryElement(file, character.Name, null, true, desc));
+            }
+        }
+
+        if (elements.Count == 0)
+        {
+            ShowNoCharacterDialog();
+            return;
+        }
+
+        var inquiry = new MultiSelectionInquiryData(
+            "Select Character",
+            $"Server: {_pendingServerAddress}:{_pendingServerPort}\n\nSelect your character:",
+            elements,
+            true,
+            1,
+            1,
+            "Join",
+            "Create New",
+            OnJoinCharacterSelected,
+            _ => OnNewCharacterSelected()
+        );
+
+        MBInformationManager.ShowMultiSelectionInquiry(inquiry, true);
+    }
+
+    private static void ShowNoCharacterDialog()
+    {
+        var inquiry = new InquiryData(
+            "No Saved Characters",
+            $"Server: {_pendingServerAddress}:{_pendingServerPort}\n\n" +
+            "You have no saved characters.\n\n" +
+            "Create a character first, then join.",
+            true,
+            true,
+            "Create Character",
+            "Cancel",
+            OnNewCharacterSelected,
+            null
+        );
+        InformationManager.ShowInquiry(inquiry, true);
+    }
+
+    private static void OnJoinCharacterSelected(List<InquiryElement> selected)
+    {
+        if (selected.Count == 0) return;
+
+        var filePath = selected[0].Identifier as string;
+        if (string.IsNullOrEmpty(filePath)) return;
+
+        var character = ExportedCharacter.LoadFromFile(filePath);
+        if (character == null)
+        {
+            BannerBrosModule.LogMessage("Failed to load character file");
+            return;
+        }
+
+        ConnectWithCharacter(character);
+    }
+
+    private static void ConnectWithCharacter(ExportedCharacter character)
+    {
+        BannerBrosModule.LogMessage($"Joining as {character.Name}...");
+
         var module = BannerBrosModule.Instance;
         if (module != null)
         {
-            module.JoinSession(serverAddress, serverPort);
+            module.PendingExportedCharacter = character;
+            module.JoinSession(_pendingServerAddress, _pendingServerPort);
         }
 
-        // Show instructions
+        // Show connecting dialog
         InformationManager.ShowInquiry(
             new InquiryData(
                 "Connecting...",
-                "Connecting to host and requesting save file.\n\n" +
-                "After the transfer completes:\n" +
-                "1. Go to 'Load Game' on the main menu\n" +
-                "2. Load the save starting with 'CoOp_'\n" +
-                "3. You'll enter spectator mode automatically\n" +
-                "4. The host will assign you a party to control",
+                $"Connecting as {character.Name}.\n\n" +
+                "The host's save file will transfer automatically.\n" +
+                "Game will load once transfer completes.",
                 true,
                 false,
                 "OK",
@@ -199,7 +257,7 @@ public static class MainMenuExtension
     }
 
     /// <summary>
-    /// Original join flow with character creation.
+    /// Legacy join flow with character creation - kept for "Create New" option.
     /// </summary>
     public static void ShowJoinWithCharacterDialog()
     {
