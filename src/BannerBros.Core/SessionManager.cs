@@ -2196,7 +2196,7 @@ public class SessionManager
             }
         }
 
-        // Check if we have a saved character we can reclaim
+        // Check if we have a saved character to reclaim
         if (!string.IsNullOrEmpty(packet.WorldStateData))
         {
             try
@@ -2205,10 +2205,8 @@ public class SessionManager
                 if (savedChar != null && !string.IsNullOrEmpty(savedChar.HeroId))
                 {
                     BannerBrosModule.LogMessage($"Found saved character: {savedChar.HeroName}");
-                    // Notify UI to show reclaim option
+                    // Notify UI - but don't return, we still need the save file!
                     OnSavedCharacterFound?.Invoke(savedChar);
-                    SetState(SessionState.InSession);
-                    return;
                 }
             }
             catch (Exception ex)
@@ -2217,8 +2215,9 @@ public class SessionManager
             }
         }
 
-        // For Single Authoritative Campaign: Request save file from host
-        // Client will load this save to have the same world state as host
+        // For Single Authoritative Campaign: ALWAYS request save file from host
+        // Client needs to load this save to have the same world state as host
+        // This is required whether they have a saved character or not
         BannerBrosModule.LogMessage("Requesting save file from host...");
         SetState(SessionState.WaitingForSaveFile);
         BannerBrosModule.Instance?.SaveFileTransferManager.RequestSaveFile(packet.AssignedPlayerId);
