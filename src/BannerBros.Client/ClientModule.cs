@@ -162,7 +162,7 @@ public class ClientModule : MBSubModuleBase
                     BannerBrosModule.LogMessage("Host Co-op clicked");
                     MainMenuExtension.ShowHostDialog();
                 },
-                () => (false, TextObject.Empty)
+                () => (false, new TextObject(""))
             ));
 
             // Join Co-op option
@@ -175,7 +175,7 @@ public class ClientModule : MBSubModuleBase
                     BannerBrosModule.LogMessage("Join Co-op clicked");
                     MainMenuExtension.ShowJoinDialog();
                 },
-                () => (false, TextObject.Empty)
+                () => (false, new TextObject(""))
             ));
 
             BannerBrosModule.LogMessage("[ClientModule] Co-op menu options added successfully");
