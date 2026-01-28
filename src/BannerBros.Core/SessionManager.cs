@@ -806,7 +806,7 @@ public class SessionManager
             {
                 DebugFileLog.Log($"Created party: {party.StringId}");
                 DebugFileLog.Log($"Party MemberRoster count: {party.MemberRoster?.TotalManCount ?? 0}");
-                DebugFileLog.Log($"Party LeaderHero: {party.LeaderHero?.Name ?? "null"}");
+                DebugFileLog.Log($"Party LeaderHero: {party.LeaderHero?.Name?.ToString() ?? "null"}");
 
                 // Try to move party to client's position using reflection for API compatibility
                 try
