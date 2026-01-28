@@ -57,12 +57,32 @@ Client receives save file from host but cannot auto-load it into the game. The g
 ### Attempt 5: Fix save file location (Native → Game Saves)
 **Date:** 2026-01-28
 **Commit:** ac9496b
-**Result:** 🔄 Pending test
+**Result:** ❌ Partial success - file detected but not found by name
 **Details:**
-- Discovered game's internal save list scans `Game Saves\` not `Game Saves\Native\`
-- Log showed 6 saves in `Game Saves\` but our CoOp files were in `Game Saves\Native\`
-- Changed `SaveFileTransferManager` to write to `Game Saves\` directly
-- Also added `TryLoadSave` and `LoadGameAction` methods to load attempts
+- Changed save location from `Game Saves\Native\` to `Game Saves\`
+- **File IS now detected** - game shows 7 saves (was 6)
+- BUT all save names return `(unknown)` - Name property doesn't work
+- `TryLoadViaSandBoxHelper` never called because `TryPopulateSaveGameFileInfo` returned false
+- Need to match by path instead of name
+
+**Log evidence:**
+```
+[SaveLoader] Scanned 7 saves total  ← Was 6, now 7 - our file is detected!
+[SaveLoader] All save names: [(unknown), (unknown), (unknown), (unknown), (unknown), (unknown), (unknown)]
+[SaveLoader] Directory ...\Game Saves has 7 .sav files:
+[SaveLoader]   CoOp_saveauto2 (5916491 bytes, 01/28/2026 13:59:56)  ← Our file!
+```
+
+---
+
+### Attempt 6: Match by path instead of name, always try load methods
+**Date:** 2026-01-28
+**Commit:** (pending)
+**Result:** 🔄 Pending
+**Details:**
+- Try `TryLoadViaSandBoxHelper` even if SaveGameFileInfo population fails
+- Match saves by checking multiple properties (Name, FilePath, etc.)
+- Try TryLoadSave/LoadGameAction with any matching save
 
 ---
 

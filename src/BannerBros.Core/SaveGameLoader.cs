@@ -245,17 +245,18 @@ public static class SaveGameLoader
                     }
                 }
 
-                // If we created an empty SaveGameFileInfo, try to populate it
+                // If we created an empty SaveGameFileInfo, try to populate it and load
                 if (createdSaveInfo != null)
                 {
-                    if (TryPopulateSaveGameFileInfo(createdSaveInfo, savePath, fileInfo))
+                    TryPopulateSaveGameFileInfo(createdSaveInfo, savePath, fileInfo);
+
+                    // Try loading even if population failed - the game might handle it
+                    BannerBrosModule.LogMessage("[SaveLoader] Attempting load with SaveGameFileInfo...");
+                    if (TryLoadViaSandBoxHelper(createdSaveInfo))
                     {
-                        BannerBrosModule.LogMessage("[SaveLoader] Populated SaveGameFileInfo, attempting load...");
-                        if (TryLoadViaSandBoxHelper(createdSaveInfo))
-                        {
-                            return true;
-                        }
+                        return true;
                     }
+                    BannerBrosModule.LogMessage("[SaveLoader] Direct SaveGameFileInfo load failed");
                 }
 
                 // Log all static methods for debugging
@@ -798,31 +799,81 @@ public static class SaveGameLoader
             BannerBrosModule.LogMessage($"[SaveLoader] Looking for: '{saveName}'");
 
             object? foundSave = null;
+            object? newestSave = null;
+            DateTime newestTime = DateTime.MinValue;
             int count = 0;
             var allNames = new List<string>();
+
+            // Log properties available on first save
+            bool loggedProps = false;
 
             foreach (var saveFile in saveFilesEnumerable)
             {
                 var saveType = saveFile.GetType();
+                count++;
+
+                // Log all properties on first save to see what's available
+                if (!loggedProps)
+                {
+                    loggedProps = true;
+                    BannerBrosModule.LogMessage($"[SaveLoader] SaveGameFileInfo properties available:");
+                    foreach (var prop in saveType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        try
+                        {
+                            var val = prop.GetValue(saveFile);
+                            BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = {val ?? "(null)"}");
+                        }
+                        catch (Exception ex)
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = (error: {ex.Message})");
+                        }
+                    }
+                }
+
+                // Get name
                 var nameProperty = saveType.GetProperty("Name");
                 var name = nameProperty?.GetValue(saveFile) as string ?? "(unknown)";
-                count++;
                 allNames.Add(name);
 
-                // Try exact match
+                // Try to get file path
+                var filePathProp = saveType.GetProperty("FilePath") ?? saveType.GetProperty("Path") ?? saveType.GetProperty("FullPath");
+                var filePath = filePathProp?.GetValue(saveFile) as string;
+
+                // Try to get modification time
+                var modTimeProp = saveType.GetProperty("ModificationTime") ?? saveType.GetProperty("LastWriteTime") ?? saveType.GetProperty("SaveTime");
+                var modTime = DateTime.MinValue;
+                if (modTimeProp != null)
+                {
+                    var modVal = modTimeProp.GetValue(saveFile);
+                    if (modVal is DateTime dt) modTime = dt;
+                }
+
+                // Track newest save (we just wrote ours, so it should be newest)
+                if (modTime > newestTime)
+                {
+                    newestTime = modTime;
+                    newestSave = saveFile;
+                }
+
+                // Try exact name match
                 if (name.Equals(saveName, StringComparison.OrdinalIgnoreCase))
                 {
                     foundSave = saveFile;
-                    BannerBrosModule.LogMessage($"[SaveLoader] Found exact match: {name}");
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found exact name match: {name}");
                 }
-                // Try partial match (e.g., CoOp_ prefix might be stripped)
-                else if (name.Contains(saveName) || saveName.Contains(name))
+                // Try partial name match
+                else if (!string.IsNullOrEmpty(name) && name != "(unknown)" &&
+                         (name.Contains(saveName) || saveName.Contains(name)))
                 {
-                    BannerBrosModule.LogMessage($"[SaveLoader] Found partial match: {name}");
-                    if (foundSave == null)
-                    {
-                        foundSave = saveFile;
-                    }
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found partial name match: {name}");
+                    if (foundSave == null) foundSave = saveFile;
+                }
+                // Try path match
+                else if (!string.IsNullOrEmpty(filePath) && filePath.Contains(saveName))
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found path match: {filePath}");
+                    if (foundSave == null) foundSave = saveFile;
                 }
             }
 
@@ -832,6 +883,13 @@ public static class SaveGameLoader
             if (foundSave != null)
             {
                 return foundSave;
+            }
+
+            // If no match found but we have saves, try the newest one (we just wrote it)
+            if (newestSave != null && newestTime > DateTime.Now.AddMinutes(-2))
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] Using newest save (modified {newestTime})");
+                return newestSave;
             }
 
             // File not in game's list - check if it exists on disk
