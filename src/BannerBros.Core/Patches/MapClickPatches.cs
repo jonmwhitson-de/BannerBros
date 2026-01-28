@@ -27,6 +27,34 @@ public static class MapClickPatches
     }
 
     /// <summary>
+    /// Gets the MobileParty from MobilePartyAi using reflection for API compatibility.
+    /// </summary>
+    private static MobileParty? GetPartyFromAi(MobilePartyAi ai)
+    {
+        try
+        {
+            // Try "MobileParty" property
+            var prop = ai.GetType().GetProperty("MobileParty");
+            if (prop != null)
+                return prop.GetValue(ai) as MobileParty;
+
+            // Try "Party" property
+            prop = ai.GetType().GetProperty("Party");
+            if (prop != null)
+                return prop.GetValue(ai) as MobileParty;
+
+            // Try "_mobileParty" field
+            var field = ai.GetType().GetField("_mobileParty",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (field != null)
+                return field.GetValue(ai) as MobileParty;
+        }
+        catch { }
+
+        return null;
+    }
+
+    /// <summary>
     /// Patch for MobileParty.SetMoveGoToPoint - intercepts movement commands.
     /// When client clicks on map, this converts it to a network command.
     /// </summary>
@@ -40,7 +68,7 @@ public static class MapClickPatches
                 if (!ShouldInterceptMovement()) return true;
 
                 // Check if this is our assigned party
-                var party = __instance.MobileParty;
+                var party = GetPartyFromAi(__instance);
                 var module = BannerBrosModule.Instance;
                 var spectatorMgr = module?.SpectatorModeManager;
 
@@ -73,7 +101,7 @@ public static class MapClickPatches
             {
                 if (!ShouldInterceptMovement()) return true;
 
-                var party = __instance.MobileParty;
+                var party = GetPartyFromAi(__instance);
                 var module = BannerBrosModule.Instance;
                 var spectatorMgr = module?.SpectatorModeManager;
 
