@@ -26,10 +26,20 @@ public class BannerBrosModule : MBSubModuleBase
     public SessionManager SessionManager { get; private set; } = null!;
     public PlayerSaveData PlayerSaveData { get; set; } = new();
 
+    // Single Authoritative Campaign managers
+    public SaveFileTransferManager SaveFileTransferManager { get; private set; } = null!;
+    public SpectatorModeManager SpectatorModeManager { get; private set; } = null!;
+    public CommandHandler CommandHandler { get; private set; } = null!;
+
     /// <summary>
     /// Character data captured from character creation, pending to be sent to server.
     /// </summary>
     public ExportedCharacter? PendingExportedCharacter { get; set; }
+
+    /// <summary>
+    /// Path to save file received from host, waiting to be loaded.
+    /// </summary>
+    public string? PendingSaveFilePath { get; set; }
 
     public bool IsHost { get; private set; }
     public bool IsConnected { get; private set; }
@@ -44,6 +54,12 @@ public class BannerBrosModule : MBSubModuleBase
         PlayerManager = new PlayerManager();
         WorldStateManager = new WorldStateManager();
         SessionManager = new SessionManager(PlayerManager, WorldStateManager);
+
+        // Initialize single authoritative campaign managers
+        SaveFileTransferManager = new SaveFileTransferManager(SessionManager);
+        SpectatorModeManager = new SpectatorModeManager();
+        CommandHandler = new CommandHandler(PlayerManager);
+
         InitializeHarmony();
 
         LogMessage("BannerBros v0.1.0 loaded");
@@ -236,6 +252,10 @@ public class BannerBrosModule : MBSubModuleBase
             LogMessage("HostSession: Initializing SessionManager...");
             SessionManager.Initialize();
 
+            // Initialize host-side managers
+            SaveFileTransferManager.Initialize();
+            CommandHandler.Initialize();
+
             LogMessage("HostSession: Starting host session...");
             SessionManager.StartHostSession();
 
@@ -260,17 +280,56 @@ public class BannerBrosModule : MBSubModuleBase
         IsHost = false;
         LogMessage("JoinSession: Initializing SessionManager...");
         SessionManager.Initialize();
+
+        // Initialize client-side managers
+        SaveFileTransferManager.Initialize();
+        SpectatorModeManager.Initialize();
+
+        // Set up save file transfer callback
+        SaveFileTransferManager.OnSaveFileReady += OnSaveFileReadyToLoad;
+        SaveFileTransferManager.OnTransferProgress += OnSaveTransferProgress;
+
         LogMessage("JoinSession: Connecting to server...");
         NetworkManager.Instance.Connect(address, port);
         IsConnected = true;
         LogMessage($"Joining session at {address}:{port}");
     }
 
+    /// <summary>
+    /// Called when save file has been received and is ready to load.
+    /// </summary>
+    private void OnSaveFileReadyToLoad(string savePath)
+    {
+        LogMessage($"Save file ready at: {savePath}");
+        PendingSaveFilePath = savePath;
+        LogMessage("Please load the co-op save from the Load Game menu");
+
+        // TODO: Auto-load the save file if possible
+        // For now, user must manually load it
+    }
+
+    /// <summary>
+    /// Called during save file transfer to show progress.
+    /// </summary>
+    private void OnSaveTransferProgress(float progress)
+    {
+        if ((int)(progress * 100) % 20 == 0) // Log every 20%
+        {
+            LogMessage($"Save file transfer: {progress * 100:F0}%");
+        }
+    }
+
     public void Disconnect()
     {
+        // Cleanup managers
+        SaveFileTransferManager?.Cleanup();
+        SpectatorModeManager?.Cleanup();
+        CommandHandler?.Cleanup();
+
         NetworkManager.Instance?.Disconnect();
         SessionManager.Cleanup();
         PlayerManager.Clear();
+        PendingSaveFilePath = null;
         IsConnected = false;
         IsHost = false;
         LogMessage("Disconnected from session");

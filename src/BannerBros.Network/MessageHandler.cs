@@ -26,6 +26,23 @@ public class MessageHandler
     public event Action<FullStateSyncPacket>? OnFullStateSyncReceived;
     public event Action<ClientCampaignReadyPacket, int>? OnClientCampaignReadyReceived; // packet, peerId
 
+    // Save file transfer events
+    public event Action<SaveFileRequestPacket, int>? OnSaveFileRequestReceived;
+    public event Action<SaveFileStartPacket>? OnSaveFileStartReceived;
+    public event Action<SaveFileChunkPacket>? OnSaveFileChunkReceived;
+    public event Action<SaveFileCompletePacket>? OnSaveFileCompleteReceived;
+    public event Action<SaveFileReceivedPacket, int>? OnSaveFileReceivedReceived;
+    public event Action<SpectatorReadyPacket, int>? OnSpectatorReadyReceived;
+    public event Action<PartyAssignmentPacket>? OnPartyAssignmentReceived;
+
+    // Command events
+    public event Action<MoveCommandPacket, int>? OnMoveCommandReceived;
+    public event Action<EnterSettlementCommandPacket, int>? OnEnterSettlementCommandReceived;
+    public event Action<LeaveSettlementCommandPacket, int>? OnLeaveSettlementCommandReceived;
+    public event Action<AttackCommandPacket, int>? OnAttackCommandReceived;
+    public event Action<FollowCommandPacket, int>? OnFollowCommandReceived;
+    public event Action<CommandResultPacket>? OnCommandResultReceived;
+
     public MessageHandler(NetworkManager networkManager)
     {
         _networkManager = networkManager;
@@ -192,5 +209,104 @@ public class MessageHandler
         if (!_networkManager.IsHost) return;
 
         OnClientCampaignReadyReceived?.Invoke(packet, peer.Id);
+    }
+
+    // ========================================================================
+    // Save File Transfer Handlers
+    // ========================================================================
+
+    public void HandleSaveFileRequest(SaveFileRequestPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Save file request from player {packet.PlayerId}");
+        if (!_networkManager.IsHost) return;
+        OnSaveFileRequestReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleSaveFileStart(SaveFileStartPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Save file transfer starting: {packet.SaveFileName} ({packet.TotalSize} bytes, {packet.TotalChunks} chunks)");
+        if (_networkManager.IsHost) return; // Only clients receive this
+        OnSaveFileStartReceived?.Invoke(packet);
+    }
+
+    public void HandleSaveFileChunk(SaveFileChunkPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Save file chunk {packet.ChunkIndex + 1}/{packet.TotalChunks}");
+        if (_networkManager.IsHost) return;
+        OnSaveFileChunkReceived?.Invoke(packet);
+    }
+
+    public void HandleSaveFileComplete(SaveFileCompletePacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Save file transfer complete: {packet.SaveFileName}");
+        if (_networkManager.IsHost) return;
+        OnSaveFileCompleteReceived?.Invoke(packet);
+    }
+
+    public void HandleSaveFileReceived(SaveFileReceivedPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Client {packet.PlayerId} received save file: Success={packet.Success}");
+        if (!_networkManager.IsHost) return;
+        OnSaveFileReceivedReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleSpectatorReady(SpectatorReadyPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Spectator ready: {packet.PlayerName} (player {packet.PlayerId})");
+        if (!_networkManager.IsHost) return;
+        OnSpectatorReadyReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandlePartyAssignment(PartyAssignmentPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Party assignment for player {packet.PlayerId}: {packet.PartyId}");
+        if (_networkManager.IsHost) return;
+        OnPartyAssignmentReceived?.Invoke(packet);
+    }
+
+    // ========================================================================
+    // Command Handlers (Client -> Host)
+    // ========================================================================
+
+    public void HandleMoveCommand(MoveCommandPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Move command from player {packet.PlayerId} to ({packet.TargetX}, {packet.TargetY})");
+        if (!_networkManager.IsHost) return;
+        OnMoveCommandReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleEnterSettlementCommand(EnterSettlementCommandPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Enter settlement command from player {packet.PlayerId}: {packet.SettlementId}");
+        if (!_networkManager.IsHost) return;
+        OnEnterSettlementCommandReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleLeaveSettlementCommand(LeaveSettlementCommandPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Leave settlement command from player {packet.PlayerId}");
+        if (!_networkManager.IsHost) return;
+        OnLeaveSettlementCommandReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleAttackCommand(AttackCommandPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Attack command from player {packet.PlayerId} targeting {packet.TargetPartyId}");
+        if (!_networkManager.IsHost) return;
+        OnAttackCommandReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleFollowCommand(FollowCommandPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Follow command from player {packet.PlayerId} targeting {packet.TargetPartyId}");
+        if (!_networkManager.IsHost) return;
+        OnFollowCommandReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleCommandResult(CommandResultPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Command result for player {packet.PlayerId}: {packet.CommandType} Success={packet.Success}");
+        if (_networkManager.IsHost) return;
+        OnCommandResultReceived?.Invoke(packet);
     }
 }

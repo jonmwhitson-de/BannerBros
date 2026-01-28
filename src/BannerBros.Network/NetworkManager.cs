@@ -69,6 +69,23 @@ public class NetworkManager : INetEventListener
         _packetProcessor.SubscribeReusable<CharacterCreationResponsePacket, NetPeer>(_messageHandler.HandleCharacterCreationResponse);
         _packetProcessor.SubscribeReusable<FullStateSyncPacket, NetPeer>(_messageHandler.HandleFullStateSync);
         _packetProcessor.SubscribeReusable<ClientCampaignReadyPacket, NetPeer>(_messageHandler.HandleClientCampaignReady);
+
+        // Save file transfer packets
+        _packetProcessor.SubscribeReusable<SaveFileRequestPacket, NetPeer>(_messageHandler.HandleSaveFileRequest);
+        _packetProcessor.SubscribeReusable<SaveFileStartPacket, NetPeer>(_messageHandler.HandleSaveFileStart);
+        _packetProcessor.SubscribeReusable<SaveFileChunkPacket, NetPeer>(_messageHandler.HandleSaveFileChunk);
+        _packetProcessor.SubscribeReusable<SaveFileCompletePacket, NetPeer>(_messageHandler.HandleSaveFileComplete);
+        _packetProcessor.SubscribeReusable<SaveFileReceivedPacket, NetPeer>(_messageHandler.HandleSaveFileReceived);
+        _packetProcessor.SubscribeReusable<SpectatorReadyPacket, NetPeer>(_messageHandler.HandleSpectatorReady);
+        _packetProcessor.SubscribeReusable<PartyAssignmentPacket, NetPeer>(_messageHandler.HandlePartyAssignment);
+
+        // Command packets
+        _packetProcessor.SubscribeReusable<MoveCommandPacket, NetPeer>(_messageHandler.HandleMoveCommand);
+        _packetProcessor.SubscribeReusable<EnterSettlementCommandPacket, NetPeer>(_messageHandler.HandleEnterSettlementCommand);
+        _packetProcessor.SubscribeReusable<LeaveSettlementCommandPacket, NetPeer>(_messageHandler.HandleLeaveSettlementCommand);
+        _packetProcessor.SubscribeReusable<AttackCommandPacket, NetPeer>(_messageHandler.HandleAttackCommand);
+        _packetProcessor.SubscribeReusable<FollowCommandPacket, NetPeer>(_messageHandler.HandleFollowCommand);
+        _packetProcessor.SubscribeReusable<CommandResultPacket, NetPeer>(_messageHandler.HandleCommandResult);
     }
 
     public void StartHost(int port, int maxPlayers = 4)

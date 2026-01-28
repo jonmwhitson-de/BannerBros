@@ -2227,16 +2227,11 @@ public class SessionManager
             }
         }
 
-        if (packet.RequiresCharacterCreation)
-        {
-            SetState(SessionState.CharacterCreation);
-            _awaitingCharacterCreation = true;
-            OnCharacterCreationRequired?.Invoke();
-        }
-        else
-        {
-            SetState(SessionState.InSession);
-        }
+        // For Single Authoritative Campaign: Request save file from host
+        // Client will load this save to have the same world state as host
+        BannerBrosModule.LogMessage("Requesting save file from host...");
+        SetState(SessionState.WaitingForSaveFile);
+        BannerBrosModule.Instance?.SaveFileTransferManager.RequestSaveFile(packet.AssignedPlayerId);
     }
 
     /// <summary>
@@ -2449,22 +2444,28 @@ public class SessionManager
 
     #endregion
 
-    private class SpawnResult
-    {
-        public bool Success { get; set; }
-        public string? ErrorMessage { get; set; }
-        public string? HeroId { get; set; }
-        public string? PartyId { get; set; }
-        public string? ClanId { get; set; }
-        public float SpawnX { get; set; }
-        public float SpawnY { get; set; }
-    }
+}
+
+/// <summary>
+/// Result of spawning a player party.
+/// </summary>
+public class SpawnResult
+{
+    public bool Success { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? HeroId { get; set; }
+    public string? PartyId { get; set; }
+    public string? ClanId { get; set; }
+    public float SpawnX { get; set; }
+    public float SpawnY { get; set; }
 }
 
 public enum SessionState
 {
     Disconnected,
     Joining,
+    WaitingForSaveFile,
     CharacterCreation,
+    SpectatorMode,
     InSession
 }

@@ -277,3 +277,138 @@ public class ClientCampaignReadyPacket
     public int Age { get; set; }
     public string BodyPropertiesXml { get; set; } = "";
 }
+
+// ============================================================================
+// SAVE FILE TRANSFER PACKETS (for Single Authoritative Campaign architecture)
+// ============================================================================
+
+/// <summary>
+/// Sent by client to request the host's save file after joining.
+/// </summary>
+public class SaveFileRequestPacket
+{
+    public int PlayerId { get; set; }
+}
+
+/// <summary>
+/// Sent by host to indicate save file transfer is starting.
+/// </summary>
+public class SaveFileStartPacket
+{
+    public string SaveFileName { get; set; } = "";
+    public long TotalSize { get; set; }
+    public int TotalChunks { get; set; }
+    public string SaveChecksum { get; set; } = "";  // MD5 hash for verification
+}
+
+/// <summary>
+/// A chunk of save file data. Save files can be several MB so we send in chunks.
+/// </summary>
+public class SaveFileChunkPacket
+{
+    public int ChunkIndex { get; set; }
+    public int TotalChunks { get; set; }
+    public byte[] Data { get; set; } = Array.Empty<byte>();
+    public int DataLength { get; set; }
+}
+
+/// <summary>
+/// Sent by host when all chunks have been sent.
+/// </summary>
+public class SaveFileCompletePacket
+{
+    public string SaveFileName { get; set; } = "";
+    public string SaveChecksum { get; set; } = "";
+}
+
+/// <summary>
+/// Sent by client to confirm save file received and ready to load.
+/// </summary>
+public class SaveFileReceivedPacket
+{
+    public int PlayerId { get; set; }
+    public bool Success { get; set; }
+    public string ErrorMessage { get; set; } = "";
+}
+
+/// <summary>
+/// Sent by client when they've loaded the shared save and are in spectator mode.
+/// </summary>
+public class SpectatorReadyPacket
+{
+    public int PlayerId { get; set; }
+    public string PlayerName { get; set; } = "";
+}
+
+/// <summary>
+/// Sent by host to assign a party to a spectator client.
+/// </summary>
+public class PartyAssignmentPacket
+{
+    public int PlayerId { get; set; }
+    public string PartyId { get; set; } = "";
+    public string HeroId { get; set; } = "";
+    public string ClanId { get; set; } = "";
+    public float MapX { get; set; }
+    public float MapY { get; set; }
+}
+
+// ============================================================================
+// COMMAND PACKETS (Client -> Host for single authoritative architecture)
+// ============================================================================
+
+/// <summary>
+/// Command from client to move their party to a position.
+/// </summary>
+public class MoveCommandPacket
+{
+    public int PlayerId { get; set; }
+    public float TargetX { get; set; }
+    public float TargetY { get; set; }
+}
+
+/// <summary>
+/// Command from client to enter a settlement.
+/// </summary>
+public class EnterSettlementCommandPacket
+{
+    public int PlayerId { get; set; }
+    public string SettlementId { get; set; } = "";
+}
+
+/// <summary>
+/// Command from client to leave current settlement.
+/// </summary>
+public class LeaveSettlementCommandPacket
+{
+    public int PlayerId { get; set; }
+}
+
+/// <summary>
+/// Command from client to attack a party.
+/// </summary>
+public class AttackCommandPacket
+{
+    public int PlayerId { get; set; }
+    public string TargetPartyId { get; set; } = "";
+}
+
+/// <summary>
+/// Command from client to follow a party.
+/// </summary>
+public class FollowCommandPacket
+{
+    public int PlayerId { get; set; }
+    public string TargetPartyId { get; set; } = "";
+}
+
+/// <summary>
+/// Generic command result sent from host to client.
+/// </summary>
+public class CommandResultPacket
+{
+    public int PlayerId { get; set; }
+    public string CommandType { get; set; } = "";
+    public bool Success { get; set; }
+    public string ErrorMessage { get; set; } = "";
+}
