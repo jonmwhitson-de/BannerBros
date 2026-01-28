@@ -1,0 +1,152 @@
+# Save Auto-Load Debug Log
+
+## Issue
+Client receives save file from host but cannot auto-load it into the game. The game's internal save list doesn't recognize the newly written file.
+
+---
+
+## Attempts
+
+### Attempt 1: Basic SaveGameLoader with MBSaveLoad.GetSaveFiles
+**Date:** 2026-01-28
+**Commit:** Initial implementation
+**Result:** ❌ Failed
+**Details:**
+- Used `MBSaveLoad.GetSaveFiles()` to get list of saves
+- Searched for our save by name
+- Save not found in list (list was cached from game start)
+
+---
+
+### Attempt 2: Add ForceRefreshSaveList
+**Date:** 2026-01-28
+**Commit:** d7b6bc3
+**Result:** ❌ Failed
+**Details:**
+- Added `ForceRefreshSaveList()` method
+- Tried calling `MBSaveLoad.RefreshSaveFiles()`, `Initialize()`, `InitializeSaveSystem()`
+- Refresh methods either don't exist or don't update the internal cache
+- Log showed: `Called Initialize(defaults)` but save still not in list
+
+---
+
+### Attempt 3: Create SaveGameFileInfo from path/FileInfo
+**Date:** 2026-01-28
+**Commit:** d7b6bc3
+**Result:** ❌ Failed
+**Details:**
+- Tried to find constructor that takes `string` or `FileInfo` parameter
+- SaveGameFileInfo only has parameterless constructor: `Ctor: ()`
+- Cannot create SaveGameFileInfo directly from file path
+
+---
+
+### Attempt 4: Populate empty SaveGameFileInfo via reflection
+**Date:** 2026-01-28
+**Commit:** db3d3d2
+**Result:** ❌ Failed
+**Details:**
+- Created empty SaveGameFileInfo with parameterless constructor
+- Tried to set Name, FilePath, Path properties via reflection
+- **SaveGameFileInfo has NO public properties** (log showed empty properties list)
+- Tried setting backing fields - none found with path/file in name
+- Log showed: `SaveGameFileInfo state after population:` followed by nothing
+
+---
+
+### Attempt 5: Fix save file location (Native → Game Saves)
+**Date:** 2026-01-28
+**Commit:** ac9496b
+**Result:** 🔄 Pending test
+**Details:**
+- Discovered game's internal save list scans `Game Saves\` not `Game Saves\Native\`
+- Log showed 6 saves in `Game Saves\` but our CoOp files were in `Game Saves\Native\`
+- Changed `SaveFileTransferManager` to write to `Game Saves\` directly
+- Also added `TryLoadSave` and `LoadGameAction` methods to load attempts
+
+---
+
+## Key Discoveries
+
+### SaveGameFileInfo Structure
+- Type: `TaleWorlds.SaveSystem.SaveGameFileInfo`
+- Constructors: Only parameterless `()`
+- Public Properties: **NONE** (or all return null)
+- Static Methods: **NONE**
+- The `Name` property returns `(unknown)` for all saves in the list
+
+### SandBoxSaveHelper Methods Available
+```
+add_OnStateChange(Action`1)
+remove_OnStateChange(Action`1)
+TryLoadSave(SaveGameFileInfo, Action`1, Action)
+CheckMetaDataCompatibilityErrors(MetaData)
+GetIsDisabledWithReason(SaveGameFileInfo, TextObject&)
+GetModuleNameFromModuleId(String)
+LoadGameAction(SaveGameFileInfo, Action`1, Action)
+```
+
+### MBSaveLoad Location
+- Not in `TaleWorlds.MountAndBlade` assembly
+- Found in: `TaleWorlds.Core.MBSaveLoad`
+- `GetSaveFiles` takes `Func<SaveGameFileInfo, bool>` filter parameter
+
+### Save Directory Structure
+```
+Documents/Mount and Blade II Bannerlord/
+├── Game Saves/           ← Game's internal list scans HERE
+│   ├── save001.sav
+│   ├── save002.sav
+│   └── saveauto2.sav
+└── Game Saves/Native/    ← We were writing HERE (wrong!)
+    ├── CoOp_saveauto1.sav
+    └── CoOp_saveauto2.sav
+```
+
+---
+
+## Next Steps to Try
+
+1. **Test with correct save location** - Save to `Game Saves\` and see if it appears in list
+2. **Try calling TryLoadSave with empty SaveGameFileInfo** - Maybe it reads file internally
+3. **Investigate how SaveGameFileInfo gets populated** - May need to read save file header
+4. **Look for ISaveDriver or similar** - Lower-level save system access
+5. **Check if there's a "scan directory" method** - Force rescan of save folder
+6. **Try MBSaveLoad.LoadSaveGameData directly with path** - Bypass SaveGameFileInfo entirely
+
+---
+
+## Relevant Files
+
+| File | Purpose |
+|------|---------|
+| `src/BannerBros.Core/SaveGameLoader.cs` | Handles programmatic save loading |
+| `src/BannerBros.Core/SaveFileTransferManager.cs` | Handles save file transfer and writing |
+| `src/BannerBros.Core/BannerBrosModule.cs` | Triggers auto-load in `OnSaveFileReadyToLoad` |
+
+---
+
+## Log Snippets
+
+### Save list showing wrong directory (Attempt 4)
+```
+[SaveLoader] Scanned 6 saves total
+[SaveLoader] All save names: [(unknown), (unknown), (unknown), (unknown), (unknown), (unknown)]
+[SaveLoader] Save 'CoOp_saveauto2' not in game's list
+[SaveLoader] Directory ...\Game Saves\Native has 2 .sav files:
+[SaveLoader]   CoOp_saveauto1 (5686779 bytes)
+[SaveLoader]   CoOp_saveauto2 (5929704 bytes)
+[SaveLoader] Directory ...\Game Saves has 6 .sav files:
+[SaveLoader]   save001, save002, save003, saveauto1, saveauto2, saveauto3
+```
+
+### SaveGameFileInfo has no properties (Attempt 4)
+```
+[SaveLoader] Found SaveGameFileInfo: TaleWorlds.SaveSystem.SaveGameFileInfo
+[SaveLoader] SaveGameFileInfo properties:
+[SaveLoader] SaveGameFileInfo has 1 constructors:
+[SaveLoader]   Ctor: ()
+[SaveLoader] Created empty SaveGameFileInfo, will try to populate
+[SaveLoader] SaveGameFileInfo state after population:
+[SaveLoader] SaveGameFileInfo has 0 static methods:
+```
