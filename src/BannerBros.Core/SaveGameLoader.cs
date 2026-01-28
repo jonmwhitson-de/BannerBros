@@ -1267,18 +1267,36 @@ public static class SaveGameLoader
                     var initObjectsMethod = initType.GetMethod("InitializeObjects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (initObjectsMethod != null)
                     {
-                        BannerBrosModule.LogMessage("[SaveLoader] Calling InitializeObjects()...");
-                        initObjectsMethod.Invoke(initializator, null);
-                        BannerBrosModule.LogMessage("[SaveLoader] InitializeObjects() completed!");
+                        try
+                        {
+                            BannerBrosModule.LogMessage("[SaveLoader] Calling InitializeObjects()...");
+                            initObjectsMethod.Invoke(initializator, null);
+                            BannerBrosModule.LogMessage("[SaveLoader] InitializeObjects() completed!");
+                        }
+                        catch (TargetInvocationException tie)
+                        {
+                            var inner = tie.InnerException;
+                            BannerBrosModule.LogMessage($"[SaveLoader] InitializeObjects() FAILED: {inner?.GetType().Name}: {inner?.Message}");
+                            BannerBrosModule.LogMessage($"[SaveLoader] Inner stack: {inner?.StackTrace?.Split('\n').FirstOrDefault()}");
+                            // Continue anyway - maybe we can still start the game
+                        }
                     }
 
                     // Then call AfterInitializeObjects
                     var afterInitMethod = initType.GetMethod("AfterInitializeObjects", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (afterInitMethod != null)
                     {
-                        BannerBrosModule.LogMessage("[SaveLoader] Calling AfterInitializeObjects()...");
-                        afterInitMethod.Invoke(initializator, null);
-                        BannerBrosModule.LogMessage("[SaveLoader] AfterInitializeObjects() completed!");
+                        try
+                        {
+                            BannerBrosModule.LogMessage("[SaveLoader] Calling AfterInitializeObjects()...");
+                            afterInitMethod.Invoke(initializator, null);
+                            BannerBrosModule.LogMessage("[SaveLoader] AfterInitializeObjects() completed!");
+                        }
+                        catch (TargetInvocationException tie)
+                        {
+                            var inner = tie.InnerException;
+                            BannerBrosModule.LogMessage($"[SaveLoader] AfterInitializeObjects() FAILED: {inner?.GetType().Name}: {inner?.Message}");
+                        }
                     }
                 }
             }
