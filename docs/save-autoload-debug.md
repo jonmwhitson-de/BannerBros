@@ -77,12 +77,36 @@ Client receives save file from host but cannot auto-load it into the game. The g
 
 ### Attempt 6: Match by path instead of name, always try load methods
 **Date:** 2026-01-28
+**Commit:** df348bf
+**Result:** ❌ Partial - TryLoadSave called but game crashed
+**Details:**
+- TryLoadSave was called with empty SaveGameFileInfo
+- Module mismatch dialog appeared (game is trying to load!)
+- User clicked "Yes" to load with different modules
+- Game crashed ("The application faced a problem...")
+- Root cause: Empty SaveGameFileInfo has no file reference
+
+**Log evidence:**
+```
+[SaveLoader] Trying TryLoadSave(SaveGameFileInfo, Action`1, Action)
+[SaveLoader] TryLoadSave(3 params) called!
+[AutoLoad] Save loading initiated!
+```
+
+**Also noticed:**
+- Double messages appearing (OnSaveFileReady triggered twice on rejoin)
+- Progress went to 200%+ (chunks received twice)
+
+---
+
+### Attempt 7: Get save from game's list FIRST, then load
+**Date:** 2026-01-28
 **Commit:** (pending)
 **Result:** 🔄 Pending
 **Details:**
-- Try `TryLoadViaSandBoxHelper` even if SaveGameFileInfo population fails
-- Match saves by checking multiple properties (Name, FilePath, etc.)
-- Try TryLoadSave/LoadGameAction with any matching save
+- Change order: Try GetSaveFileInfo first to find save in game's list
+- Use the proper SaveGameFileInfo (with file reference) for loading
+- Only fall back to empty SaveGameFileInfo if not in list
 
 ---
 

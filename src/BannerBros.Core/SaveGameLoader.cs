@@ -22,49 +22,46 @@ public static class SaveGameLoader
         // Force refresh the save list to include newly written file
         ForceRefreshSaveList();
 
-        // First try to load directly by path (faster, works for newly written files)
+        // FIRST try to get save from game's internal list (has proper file references)
+        var saveFileInfo = GetSaveFileInfo(saveName);
+
+        if (saveFileInfo != null)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] Found save in game's list: {saveFileInfo.GetType().Name}");
+
+            // Try to load with proper SaveGameFileInfo
+            if (TryLoadViaSandBoxHelper(saveFileInfo))
+            {
+                return true;
+            }
+            if (TryLoadViaMBSaveLoad(saveFileInfo))
+            {
+                return true;
+            }
+            if (TryLoadViaGameState(saveFileInfo))
+            {
+                return true;
+            }
+            if (TryLoadViaMBGameManager(saveFileInfo))
+            {
+                return true;
+            }
+
+            BannerBrosModule.LogMessage("[SaveLoader] All load methods failed with game's SaveGameFileInfo");
+        }
+        else
+        {
+            BannerBrosModule.LogMessage("[SaveLoader] Save not in game's list, trying direct path load...");
+        }
+
+        // FALLBACK: Try to load directly by path (creates empty SaveGameFileInfo)
         if (TryLoadDirectlyByPath(savePath))
         {
             return true;
         }
 
-        // Get the save file info object from game's save list
-        var saveFileInfo = GetSaveFileInfo(saveName);
-
-        if (saveFileInfo == null)
-        {
-            BannerBrosModule.LogMessage("[SaveLoader] Could not find save in game's save list!");
-            BannerBrosModule.LogMessage("[SaveLoader] The file may be too new - try manual load");
-            return false;
-        }
-
-        BannerBrosModule.LogMessage($"[SaveLoader] Found save file info: {saveFileInfo.GetType().Name}");
-
-        // Try Method 1: SandBoxSaveHelper.LoadSaveGame (most common)
-        if (TryLoadViaSandBoxHelper(saveFileInfo))
-        {
-            return true;
-        }
-
-        // Try Method 2: MBSaveLoad.LoadSaveGameData
-        if (TryLoadViaMBSaveLoad(saveFileInfo))
-        {
-            return true;
-        }
-
-        // Try Method 3: GameStateManager approach
-        if (TryLoadViaGameState(saveFileInfo))
-        {
-            return true;
-        }
-
-        // Try Method 4: MBGameManager
-        if (TryLoadViaMBGameManager(saveFileInfo))
-        {
-            return true;
-        }
-
-        BannerBrosModule.LogMessage("[SaveLoader] All load methods failed!");
+        BannerBrosModule.LogMessage("[SaveLoader] Could not load save by any method!");
+        BannerBrosModule.LogMessage("[SaveLoader] Try loading manually from Load Game menu");
         return false;
     }
 
