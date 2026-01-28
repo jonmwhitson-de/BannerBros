@@ -101,12 +101,32 @@ Client receives save file from host but cannot auto-load it into the game. The g
 
 ### Attempt 7: Get save from game's list FIRST, then load
 **Date:** 2026-01-28
+**Commit:** bca67e7
+**Result:** ❌ Failed - still crashed, save not found in list
+**Details:**
+- Changed order to try game's list first
+- BUT save still not found - all 7 saves have Name = "(unknown)"
+- Fell back to empty SaveGameFileInfo, crashed again
+- SaveGameFileInfo has NO public properties at all
+
+**Log evidence:**
+```
+[SaveLoader] SaveGameFileInfo properties available:
+[SaveLoader] Scanned 7 saves total  ← Nothing logged between these
+[SaveLoader] All save names: [(unknown) x7]
+[SaveLoader] Save not in game's list, trying direct path load...
+```
+
+---
+
+### Attempt 8: Log ALL members including private fields
+**Date:** 2026-01-28
 **Commit:** (pending)
 **Result:** 🔄 Pending
 **Details:**
-- Change order: Try GetSaveFileInfo first to find save in game's list
-- Use the proper SaveGameFileInfo (with file reference) for loading
-- Only fall back to empty SaveGameFileInfo if not in list
+- Log ALL properties AND fields (including private/internal)
+- Deep inspection: Check all field values for "CoOp_" or save name
+- This will reveal what data SaveGameFileInfo actually contains
 
 ---
 

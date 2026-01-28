@@ -809,21 +809,41 @@ public static class SaveGameLoader
                 var saveType = saveFile.GetType();
                 count++;
 
-                // Log all properties on first save to see what's available
+                // Log ALL members on first save (including private fields)
                 if (!loggedProps)
                 {
                     loggedProps = true;
-                    BannerBrosModule.LogMessage($"[SaveLoader] SaveGameFileInfo properties available:");
-                    foreach (var prop in saveType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                    BannerBrosModule.LogMessage($"[SaveLoader] SaveGameFileInfo ALL members:");
+
+                    // Log properties (public and non-public)
+                    var allProps = saveType.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    BannerBrosModule.LogMessage($"[SaveLoader]   Properties ({allProps.Length}):");
+                    foreach (var prop in allProps)
                     {
                         try
                         {
                             var val = prop.GetValue(saveFile);
-                            BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = {val ?? "(null)"}");
+                            BannerBrosModule.LogMessage($"[SaveLoader]     {prop.Name} = {val ?? "(null)"}");
                         }
                         catch (Exception ex)
                         {
-                            BannerBrosModule.LogMessage($"[SaveLoader]   {prop.Name} = (error: {ex.Message})");
+                            BannerBrosModule.LogMessage($"[SaveLoader]     {prop.Name} = (error: {ex.Message})");
+                        }
+                    }
+
+                    // Log fields (including private)
+                    var allFields = saveType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    BannerBrosModule.LogMessage($"[SaveLoader]   Fields ({allFields.Length}):");
+                    foreach (var field in allFields)
+                    {
+                        try
+                        {
+                            var val = field.GetValue(saveFile);
+                            BannerBrosModule.LogMessage($"[SaveLoader]     {field.Name} = {val ?? "(null)"}");
+                        }
+                        catch (Exception ex)
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader]     {field.Name} = (error: {ex.Message})");
                         }
                     }
                 }
@@ -887,6 +907,42 @@ public static class SaveGameLoader
             {
                 BannerBrosModule.LogMessage($"[SaveLoader] Using newest save (modified {newestTime})");
                 return newestSave;
+            }
+
+            // FALLBACK: Try to find by iterating and checking all fields/properties for our filename
+            BannerBrosModule.LogMessage($"[SaveLoader] Trying to find save by deep inspection...");
+            foreach (var saveFile in saveFilesEnumerable)
+            {
+                var saveType = saveFile.GetType();
+
+                // Check all fields and properties for our save name
+                foreach (var field in saveType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                {
+                    try
+                    {
+                        var val = field.GetValue(saveFile)?.ToString() ?? "";
+                        if (val.Contains(saveName) || val.Contains("CoOp_"))
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader] Found via field {field.Name} = {val}");
+                            return saveFile;
+                        }
+                    }
+                    catch { }
+                }
+
+                foreach (var prop in saveType.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                {
+                    try
+                    {
+                        var val = prop.GetValue(saveFile)?.ToString() ?? "";
+                        if (val.Contains(saveName) || val.Contains("CoOp_"))
+                        {
+                            BannerBrosModule.LogMessage($"[SaveLoader] Found via property {prop.Name} = {val}");
+                            return saveFile;
+                        }
+                    }
+                    catch { }
+                }
             }
 
             // File not in game's list - check if it exists on disk
