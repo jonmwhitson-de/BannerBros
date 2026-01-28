@@ -121,12 +121,44 @@ Client receives save file from host but cannot auto-load it into the game. The g
 
 ### Attempt 8: Log ALL members including private fields
 **Date:** 2026-01-28
+**Commit:** bac0757
+**Result:** ❌ Found save, TryLoadSave called, but nothing happened
+**Details:**
+- Successfully found SaveGameFileInfo structure:
+  - 0 properties
+  - 3 fields: `Name`, `MetaData`, `IsCorrupted`
+- Found our save via deep inspection: `Name = CoOp_saveauto2`
+- Called TryLoadSave with proper SaveGameFileInfo
+- But no module dialog appeared, no load happened
+- TryLoadSave might have precondition checks that silently fail
+
+**Log evidence:**
+```
+[SaveLoader] SaveGameFileInfo ALL members:
+[SaveLoader]   Properties (0):
+[SaveLoader]   Fields (3):
+[SaveLoader]     Name = CoOp_saveauto2
+[SaveLoader]     MetaData = TaleWorlds.SaveSystem.MetaData
+[SaveLoader]     IsCorrupted = False
+[SaveLoader] Found via field Name = CoOp_saveauto2
+[SaveLoader] Found save in game's list: SaveGameFileInfo
+[SaveLoader] Trying TryLoadSave(SaveGameFileInfo, Action`1, Action)
+[SaveLoader] TryLoadSave(3 params) called!
+[SaveLoader] Save loading initiated!
+... (nothing happens, just state syncs)
+```
+
+---
+
+### Attempt 9: Try LoadGameAction first, check return values
+**Date:** 2026-01-28
 **Commit:** (pending)
 **Result:** 🔄 Pending
 **Details:**
-- Log ALL properties AND fields (including private/internal)
-- Deep inspection: Check all field values for "CoOp_" or save name
-- This will reveal what data SaveGameFileInfo actually contains
+- Prioritize LoadGameAction over TryLoadSave
+- Log return value of each method
+- If TryLoadSave returns false, try next method
+- Log all available methods upfront
 
 ---
 
