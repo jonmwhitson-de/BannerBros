@@ -236,6 +236,9 @@ public class BannerBrosModule : MBSubModuleBase
     {
         try
         {
+            // Initialize debug logging for server
+            DebugLog.Initialize(isHost: true);
+
             LogMessage("HostSession: Setting IsHost = true");
             IsHost = true;
 
@@ -271,6 +274,9 @@ public class BannerBrosModule : MBSubModuleBase
 
     public void JoinSession(string address, int port = 7777)
     {
+        // Initialize debug logging for client
+        DebugLog.Initialize(isHost: false);
+
         if (NetworkManager.Instance == null)
         {
             LogMessage("Error: NetworkManager not initialized!");
@@ -425,6 +431,10 @@ public class BannerBrosModule : MBSubModuleBase
 
     public static void LogMessage(string message)
     {
+        // Display in game
         InformationManager.DisplayMessage(new InformationMessage($"[BannerBros] {message}"));
+
+        // Also log to file for debugging
+        DebugLog.Log(message);
     }
 }

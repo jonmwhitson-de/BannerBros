@@ -16,31 +16,6 @@ using BannerBros.Network;
 namespace BannerBros.Core;
 
 /// <summary>
-/// Debug file logger that writes immediately to disk (survives crashes).
-/// </summary>
-public static class DebugFileLog
-{
-    private static readonly string LogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-        "Mount and Blade II Bannerlord", "Configs", "BannerBros_Debug.log");
-
-    public static void Log(string message)
-    {
-        try
-        {
-            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
-            File.AppendAllText(LogPath, line);
-        }
-        catch { }
-    }
-
-    public static void Clear()
-    {
-        try { File.Delete(LogPath); } catch { }
-    }
-}
-
-/// <summary>
 /// Manages multiplayer session state including join flow, player spawning,
 /// and synchronization between host and clients.
 /// </summary>
@@ -368,10 +343,8 @@ public class SessionManager
             State = PlayerState.InMenu  // Will change to OnMap when their campaign loads
         };
 
-        // Clear debug log at start of join
-        DebugFileLog.Clear();
-        DebugFileLog.Log($"=== JOIN STARTED for {packet.PlayerName} ===");
-        DebugFileLog.Log("MVP FLOW: Deferring hero creation until client's campaign loads");
+        DebugLog.Log($"=== JOIN STARTED for {packet.PlayerName} ===");
+        DebugLog.Log("MVP FLOW: Deferring hero creation until client's campaign loads");
 
         // Check if this player has a saved character they can reclaim
         if (hasValidSavedCharacter && savedCharacter != null)
@@ -428,10 +401,10 @@ public class SessionManager
             BannerBrosModule.LogMessage($"Warning: Failed to send state sync: {syncEx.Message}");
         }
 
-        DebugFileLog.Log("Join processing: All steps complete");
+        DebugLog.Log("Join processing: All steps complete");
         BannerBrosModule.LogMessage($"Join processing complete for {packet.PlayerName} (Player count: {_playerManager.PlayerCount})");
-        DebugFileLog.Log("Join processing: Message logged, returning from method");
-        DebugFileLog.Log("=== JOIN PROCESSING RETURNED ===");
+        DebugLog.Log("Join processing: Message logged, returning from method");
+        DebugLog.Log("=== JOIN PROCESSING RETURNED ===");
     }
 
     private string GetHeroName(string heroId)
@@ -641,7 +614,7 @@ public class SessionManager
         if (networkManager == null || !networkManager.IsHost) return;
 
         BannerBrosModule.LogMessage($"Client campaign ready: {packet.HeroName} (player {packet.PlayerId})");
-        DebugFileLog.Log($"=== CLIENT CAMPAIGN READY: {packet.HeroName} ===");
+        DebugLog.Log($"=== CLIENT CAMPAIGN READY: {packet.HeroName} ===");
 
         var player = _playerManager.GetPlayer(packet.PlayerId);
         if (player == null)
@@ -686,7 +659,7 @@ public class SessionManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"HandleClientCampaignReady error: {ex.Message}");
-            DebugFileLog.Log($"HandleClientCampaignReady error: {ex.Message}\n{ex.StackTrace}");
+            DebugLog.Log($"HandleClientCampaignReady error: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
@@ -702,7 +675,7 @@ public class SessionManager
 
         try
         {
-            DebugFileLog.Log($"Creating shadow hero for {packet.HeroName}");
+            DebugLog.Log($"Creating shadow hero for {packet.HeroName}");
 
             // Get the culture
             var culture = MBObjectManager.Instance.GetObject<CultureObject>(packet.CultureId);
@@ -739,7 +712,7 @@ public class SessionManager
             {
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create clan" };
             }
-            DebugFileLog.Log($"Created clan: {clan.StringId}");
+            DebugLog.Log($"Created clan: {clan.StringId}");
 
             // Create the hero
             var characterTemplate = culture.BasicTroop;
@@ -755,7 +728,7 @@ public class SessionManager
             {
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create hero" };
             }
-            DebugFileLog.Log($"Created hero: {hero.StringId}");
+            DebugLog.Log($"Created hero: {hero.StringId}");
 
             // Set hero name
             hero.SetName(new TaleWorlds.Localization.TextObject(packet.HeroName),
@@ -788,7 +761,7 @@ public class SessionManager
                 // Spawn slightly offset from host
                 spawnX = hostPos.x + 1.0f;
                 spawnY = hostPos.y + 1.0f;
-                DebugFileLog.Log($"Spawning shadow near host at ({spawnX}, {spawnY})");
+                DebugLog.Log($"Spawning shadow near host at ({spawnX}, {spawnY})");
             }
             else
             {
@@ -796,7 +769,7 @@ public class SessionManager
                 var settlePos = spawnSettlement.GatePosition;
                 spawnX = settlePos.X;
                 spawnY = settlePos.Y;
-                DebugFileLog.Log($"Spawning shadow at settlement ({spawnX}, {spawnY})");
+                DebugLog.Log($"Spawning shadow at settlement ({spawnX}, {spawnY})");
             }
 
             // Create party
@@ -804,39 +777,39 @@ public class SessionManager
 
             if (party != null)
             {
-                DebugFileLog.Log($"Created party: {party.StringId}");
-                DebugFileLog.Log($"Party MemberRoster count: {party.MemberRoster?.TotalManCount ?? 0}");
-                DebugFileLog.Log($"Party LeaderHero: {party.LeaderHero?.Name?.ToString() ?? "null"}");
+                DebugLog.Log($"Created party: {party.StringId}");
+                DebugLog.Log($"Party MemberRoster count: {party.MemberRoster?.TotalManCount ?? 0}");
+                DebugLog.Log($"Party LeaderHero: {party.LeaderHero?.Name?.ToString() ?? "null"}");
 
                 // Try to move party to client's position using reflection for API compatibility
                 try
                 {
                     var posVec2 = new Vec2(spawnX, spawnY);
                     var posProp = party.GetType().GetProperty("Position2D");
-                    DebugFileLog.Log($"Position2D property: CanRead={posProp?.CanRead}, CanWrite={posProp?.CanWrite}");
+                    DebugLog.Log($"Position2D property: CanRead={posProp?.CanRead}, CanWrite={posProp?.CanWrite}");
 
                     if (posProp?.CanWrite == true)
                     {
                         posProp.SetValue(party, posVec2);
-                        DebugFileLog.Log($"Set Position2D to ({spawnX}, {spawnY})");
+                        DebugLog.Log($"Set Position2D to ({spawnX}, {spawnY})");
                     }
                     else
                     {
-                        DebugFileLog.Log("Position2D is NOT writable!");
+                        DebugLog.Log("Position2D is NOT writable!");
                     }
 
                     // Verify position was set
                     var actualPos = party.GetPosition2D;
-                    DebugFileLog.Log($"Party actual position: ({actualPos.x}, {actualPos.y})");
+                    DebugLog.Log($"Party actual position: ({actualPos.x}, {actualPos.y})");
                 }
                 catch (Exception ex)
                 {
-                    DebugFileLog.Log($"Failed to set party position: {ex.Message}");
+                    DebugLog.Log($"Failed to set party position: {ex.Message}");
                 }
 
                 // Log visibility state
-                DebugFileLog.Log($"Party IsVisible: {party.IsVisible}");
-                DebugFileLog.Log($"Party IsActive: {party.IsActive}");
+                DebugLog.Log($"Party IsVisible: {party.IsVisible}");
+                DebugLog.Log($"Party IsActive: {party.IsActive}");
             }
 
             return new SpawnResult
@@ -851,7 +824,7 @@ public class SessionManager
         }
         catch (Exception ex)
         {
-            DebugFileLog.Log($"CreateShadowHeroForClient error: {ex.Message}\n{ex.StackTrace}");
+            DebugLog.Log($"CreateShadowHeroForClient error: {ex.Message}\n{ex.StackTrace}");
             return new SpawnResult { Success = false, ErrorMessage = ex.Message };
         }
     }
@@ -1005,38 +978,38 @@ public class SessionManager
     /// </summary>
     private SpawnResult SpawnHeroFromExportedCharacter(ExportedCharacter exportedChar, CoopPlayer player)
     {
-        DebugFileLog.Log("SpawnHeroFromExportedCharacter: START");
+        DebugLog.Log("SpawnHeroFromExportedCharacter: START");
 
         if (Campaign.Current == null)
         {
-            DebugFileLog.Log("SpawnHeroFromExportedCharacter: No active campaign");
+            DebugLog.Log("SpawnHeroFromExportedCharacter: No active campaign");
             return new SpawnResult { Success = false, ErrorMessage = "No active campaign" };
         }
 
         try
         {
-            DebugFileLog.Log($"Step 1: Creating hero from exported character: {exportedChar.Name}");
+            DebugLog.Log($"Step 1: Creating hero from exported character: {exportedChar.Name}");
             BannerBrosModule.LogMessage($"Creating hero from exported character: {exportedChar.Name}");
 
             // Get the culture
-            DebugFileLog.Log($"Step 2: Getting culture {exportedChar.CultureId}");
+            DebugLog.Log($"Step 2: Getting culture {exportedChar.CultureId}");
             var culture = MBObjectManager.Instance.GetObject<CultureObject>(exportedChar.CultureId);
             if (culture == null)
             {
                 culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
                     .FirstOrDefault(c => c.IsMainCulture);
-                DebugFileLog.Log($"Step 2b: Culture not found, using default: {culture?.StringId}");
+                DebugLog.Log($"Step 2b: Culture not found, using default: {culture?.StringId}");
             }
 
             if (culture == null)
             {
-                DebugFileLog.Log("Step 2: FAILED - No valid culture");
+                DebugLog.Log("Step 2: FAILED - No valid culture");
                 return new SpawnResult { Success = false, ErrorMessage = "No valid culture found" };
             }
-            DebugFileLog.Log($"Step 2: SUCCESS - Culture: {culture.StringId}");
+            DebugLog.Log($"Step 2: SUCCESS - Culture: {culture.StringId}");
 
             // Find a spawn settlement
-            DebugFileLog.Log("Step 3: Finding spawn settlement");
+            DebugLog.Log("Step 3: Finding spawn settlement");
             var spawnSettlement = Campaign.Current.Settlements
                 .Where(s => s.IsTown && s.Culture == culture)
                 .FirstOrDefault() ??
@@ -1044,23 +1017,23 @@ public class SessionManager
 
             if (spawnSettlement == null)
             {
-                DebugFileLog.Log("Step 3: FAILED - No spawn location");
+                DebugLog.Log("Step 3: FAILED - No spawn location");
                 return new SpawnResult { Success = false, ErrorMessage = "No valid spawn location found" };
             }
-            DebugFileLog.Log($"Step 3: SUCCESS - Settlement: {spawnSettlement.Name}");
+            DebugLog.Log($"Step 3: SUCCESS - Settlement: {spawnSettlement.Name}");
 
             // Create a clan
-            DebugFileLog.Log("Step 4: Creating clan");
+            DebugLog.Log("Step 4: Creating clan");
             var clan = CreatePlayerClan(culture, exportedChar.Name);
             if (clan == null)
             {
-                DebugFileLog.Log("Step 4: FAILED - Clan creation failed");
+                DebugLog.Log("Step 4: FAILED - Clan creation failed");
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create clan" };
             }
-            DebugFileLog.Log($"Step 4: SUCCESS - Clan: {clan.StringId}");
+            DebugLog.Log($"Step 4: SUCCESS - Clan: {clan.StringId}");
 
             // Create the hero
-            DebugFileLog.Log("Step 5: Creating hero via HeroCreator.CreateSpecialHero");
+            DebugLog.Log("Step 5: Creating hero via HeroCreator.CreateSpecialHero");
             var characterTemplate = culture.BasicTroop;
             var hero = HeroCreator.CreateSpecialHero(
                 characterTemplate,
@@ -1072,19 +1045,19 @@ public class SessionManager
 
             if (hero == null)
             {
-                DebugFileLog.Log("Step 5: FAILED - Hero is null");
+                DebugLog.Log("Step 5: FAILED - Hero is null");
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create hero" };
             }
-            DebugFileLog.Log($"Step 5: SUCCESS - Hero: {hero.StringId}");
+            DebugLog.Log($"Step 5: SUCCESS - Hero: {hero.StringId}");
 
             // Set hero name
-            DebugFileLog.Log("Step 6: Setting hero name");
+            DebugLog.Log("Step 6: Setting hero name");
             hero.SetName(new TaleWorlds.Localization.TextObject(exportedChar.Name),
                          new TaleWorlds.Localization.TextObject(exportedChar.Name));
-            DebugFileLog.Log("Step 6: SUCCESS");
+            DebugLog.Log("Step 6: SUCCESS");
 
             // Set gender
-            DebugFileLog.Log("Step 7: Setting gender");
+            DebugLog.Log("Step 7: Setting gender");
             try
             {
                 if (hero.IsFemale != exportedChar.IsFemale)
@@ -1093,64 +1066,64 @@ public class SessionManager
                         BindingFlags.NonPublic | BindingFlags.Instance);
                     isFemaleField?.SetValue(hero, exportedChar.IsFemale);
                 }
-                DebugFileLog.Log("Step 7: SUCCESS");
+                DebugLog.Log("Step 7: SUCCESS");
             }
             catch (Exception ex)
             {
-                DebugFileLog.Log($"Step 7: FAILED (non-fatal) - {ex.Message}");
+                DebugLog.Log($"Step 7: FAILED (non-fatal) - {ex.Message}");
             }
 
             // Apply BodyProperties
-            DebugFileLog.Log("Step 8: Applying BodyProperties");
+            DebugLog.Log("Step 8: Applying BodyProperties");
             ApplyBodyProperties(hero, exportedChar.BodyPropertiesXml);
-            DebugFileLog.Log("Step 8: SUCCESS");
+            DebugLog.Log("Step 8: SUCCESS");
 
             // Apply attributes
-            DebugFileLog.Log("Step 9: Applying attributes");
+            DebugLog.Log("Step 9: Applying attributes");
             ApplyAttributes(hero, exportedChar.Attributes);
-            DebugFileLog.Log("Step 9: SUCCESS");
+            DebugLog.Log("Step 9: SUCCESS");
 
             // Apply skills and focus points
-            DebugFileLog.Log("Step 10: Applying skills and focus");
+            DebugLog.Log("Step 10: Applying skills and focus");
             ApplySkillsAndFocus(hero, exportedChar.Skills, exportedChar.FocusPoints);
-            DebugFileLog.Log("Step 10: SUCCESS");
+            DebugLog.Log("Step 10: SUCCESS");
 
             // Apply traits
-            DebugFileLog.Log("Step 11: Applying traits");
+            DebugLog.Log("Step 11: Applying traits");
             ApplyTraits(hero, exportedChar.Traits);
-            DebugFileLog.Log("Step 11: SUCCESS");
+            DebugLog.Log("Step 11: SUCCESS");
 
             // Apply equipment
-            DebugFileLog.Log("Step 12: Applying equipment");
+            DebugLog.Log("Step 12: Applying equipment");
             ApplyEquipment(hero, exportedChar.EquipmentIds);
-            DebugFileLog.Log("Step 12: SUCCESS");
+            DebugLog.Log("Step 12: SUCCESS");
 
             // Set gold
-            DebugFileLog.Log("Step 13: Setting gold");
+            DebugLog.Log("Step 13: Setting gold");
             try
             {
                 hero.ChangeHeroGold(exportedChar.Gold - hero.Gold);
-                DebugFileLog.Log("Step 13: SUCCESS");
+                DebugLog.Log("Step 13: SUCCESS");
             }
             catch (Exception ex)
             {
-                DebugFileLog.Log($"Step 13: FAILED (non-fatal) - {ex.Message}");
+                DebugLog.Log($"Step 13: FAILED (non-fatal) - {ex.Message}");
             }
 
             // Make clan leader
-            DebugFileLog.Log("Step 14: Setting clan leader");
+            DebugLog.Log("Step 14: Setting clan leader");
             if (clan.Leader != hero)
             {
                 clan.SetLeader(hero);
             }
-            DebugFileLog.Log("Step 14: SUCCESS");
+            DebugLog.Log("Step 14: SUCCESS");
 
             // Get spawn position
-            DebugFileLog.Log("Step 15: Getting spawn position");
+            DebugLog.Log("Step 15: Getting spawn position");
             var spawnPos = spawnSettlement.GatePosition;
             var spawnX = spawnPos.X;
             var spawnY = spawnPos.Y;
-            DebugFileLog.Log($"Step 15: SUCCESS - Position: {spawnX}, {spawnY}");
+            DebugLog.Log($"Step 15: SUCCESS - Position: {spawnX}, {spawnY}");
 
             // DEBUG: Set to true to skip party creation and test if hero alone causes crash
             const bool SKIP_PARTY_CREATION_DEBUG = false;
@@ -1159,26 +1132,26 @@ public class SessionManager
             if (!SKIP_PARTY_CREATION_DEBUG)
             {
                 // Create party
-                DebugFileLog.Log("Step 16: Creating party");
+                DebugLog.Log("Step 16: Creating party");
                 party = CreatePlayerParty(hero, clan, spawnSettlement);
 
                 if (party == null)
                 {
-                    DebugFileLog.Log("Step 16: WARNING - Party is null");
+                    DebugLog.Log("Step 16: WARNING - Party is null");
                     BannerBrosModule.LogMessage("Warning: Party creation returned null, hero may not appear on map");
                 }
                 else
                 {
-                    DebugFileLog.Log($"Step 16: SUCCESS - Party: {party.StringId}");
+                    DebugLog.Log($"Step 16: SUCCESS - Party: {party.StringId}");
                 }
             }
             else
             {
-                DebugFileLog.Log("Step 16: SKIPPED - Party creation disabled for debug");
+                DebugLog.Log("Step 16: SKIPPED - Party creation disabled for debug");
                 BannerBrosModule.LogMessage("DEBUG: Skipping party creation to isolate crash");
             }
 
-            DebugFileLog.Log("Step 17: Building result");
+            DebugLog.Log("Step 17: Building result");
             var result = new SpawnResult
             {
                 Success = true,
@@ -1189,15 +1162,15 @@ public class SessionManager
                 SpawnY = spawnY
             };
 
-            DebugFileLog.Log("SpawnHeroFromExportedCharacter: COMPLETE SUCCESS");
+            DebugLog.Log("SpawnHeroFromExportedCharacter: COMPLETE SUCCESS");
             BannerBrosModule.LogMessage($"Successfully created hero {hero.Name} from exported character data");
 
             return result;
         }
         catch (Exception ex)
         {
-            DebugFileLog.Log($"SpawnHeroFromExportedCharacter: EXCEPTION - {ex.Message}");
-            DebugFileLog.Log($"Stack: {ex.StackTrace}");
+            DebugLog.Log($"SpawnHeroFromExportedCharacter: EXCEPTION - {ex.Message}");
+            DebugLog.Log($"Stack: {ex.StackTrace}");
             BannerBrosModule.LogMessage($"SpawnHeroFromExportedCharacter error: {ex}");
             return new SpawnResult { Success = false, ErrorMessage = ex.Message };
         }
@@ -1505,7 +1478,7 @@ public class SessionManager
             if (party != null)
             {
                 BannerBrosModule.LogMessage($"Party created for {hero.Name} with {party.MemberRoster?.TotalManCount ?? 0} troops");
-                DebugFileLog.Log($"Party created: {party.StringId}, initializing AI and state...");
+                DebugLog.Log($"Party created: {party.StringId}, initializing AI and state...");
 
                 // CRITICAL: Initialize the party properly to prevent crash
                 try
@@ -1514,34 +1487,34 @@ public class SessionManager
                     if (party.Ai != null)
                     {
                         party.Ai.SetDoNotMakeNewDecisions(true);
-                        DebugFileLog.Log("Set AI to not make decisions");
+                        DebugLog.Log("Set AI to not make decisions");
                     }
                 }
                 catch (Exception ex)
                 {
-                    DebugFileLog.Log($"Failed to set AI decisions: {ex.Message}");
+                    DebugLog.Log($"Failed to set AI decisions: {ex.Message}");
                 }
 
                 try
                 {
                     // Make party hold position
                     party.SetMoveModeHold();
-                    DebugFileLog.Log("Set party to hold mode");
+                    DebugLog.Log("Set party to hold mode");
                 }
                 catch (Exception ex)
                 {
-                    DebugFileLog.Log($"Failed to set hold mode: {ex.Message}");
+                    DebugLog.Log($"Failed to set hold mode: {ex.Message}");
                 }
 
                 try
                 {
                     // Ensure party is visible and active
                     party.IsVisible = true;
-                    DebugFileLog.Log("Set party visible");
+                    DebugLog.Log("Set party visible");
                 }
                 catch (Exception ex)
                 {
-                    DebugFileLog.Log($"Failed to set visibility: {ex.Message}");
+                    DebugLog.Log($"Failed to set visibility: {ex.Message}");
                 }
 
                 try
@@ -1549,19 +1522,19 @@ public class SessionManager
                     // Make sure party is in the campaign's party list
                     if (!Campaign.Current.MobileParties.Contains(party))
                     {
-                        DebugFileLog.Log("WARNING: Party not in Campaign.MobileParties!");
+                        DebugLog.Log("WARNING: Party not in Campaign.MobileParties!");
                     }
                     else
                     {
-                        DebugFileLog.Log("Party is in Campaign.MobileParties");
+                        DebugLog.Log("Party is in Campaign.MobileParties");
                     }
                 }
                 catch (Exception ex)
                 {
-                    DebugFileLog.Log($"Failed to check party list: {ex.Message}");
+                    DebugLog.Log($"Failed to check party list: {ex.Message}");
                 }
 
-                DebugFileLog.Log("Party initialization complete");
+                DebugLog.Log("Party initialization complete");
             }
             else
             {
@@ -2410,12 +2383,12 @@ public class SessionManager
             {
                 // Party not found - might need to be created
                 // This happens if the party was created after we loaded the save
-                DebugFileLog.Log($"[Sync] Party {player.PartyId} not found for {player.Name}");
+                DebugLog.Log($"[Sync] Party {player.PartyId} not found for {player.Name}");
             }
         }
         catch (Exception ex)
         {
-            DebugFileLog.Log($"[Sync] UpdateLocalPartyPosition error: {ex.Message}");
+            DebugLog.Log($"[Sync] UpdateLocalPartyPosition error: {ex.Message}");
         }
     }
 
