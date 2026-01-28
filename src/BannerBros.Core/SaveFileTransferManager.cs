@@ -40,13 +40,21 @@ public class SaveFileTransferManager
     public void Initialize()
     {
         var networkManager = NetworkManager.Instance;
-        if (networkManager == null) return;
+        if (networkManager == null)
+        {
+            BannerBrosModule.LogMessage("[SaveTransfer] Initialize failed: NetworkManager is null");
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"[SaveTransfer] Initializing (IsHost: {networkManager.IsHost})");
 
         // Subscribe to save file transfer events
         networkManager.Messages.OnSaveFileRequestReceived += HandleSaveFileRequest;
         networkManager.Messages.OnSaveFileStartReceived += HandleSaveFileStart;
         networkManager.Messages.OnSaveFileChunkReceived += HandleSaveFileChunk;
         networkManager.Messages.OnSaveFileCompleteReceived += HandleSaveFileComplete;
+
+        BannerBrosModule.LogMessage("[SaveTransfer] Event handlers registered");
     }
 
     public void Cleanup()
@@ -68,12 +76,23 @@ public class SaveFileTransferManager
     public void RequestSaveFile(int playerId)
     {
         var networkManager = NetworkManager.Instance;
-        if (networkManager == null || networkManager.IsHost) return;
+        if (networkManager == null)
+        {
+            BannerBrosModule.LogMessage("[SaveTransfer] REQUEST FAILED: NetworkManager is null");
+            return;
+        }
+        if (networkManager.IsHost)
+        {
+            BannerBrosModule.LogMessage("[SaveTransfer] REQUEST SKIPPED: We are the host");
+            return;
+        }
 
-        BannerBrosModule.LogMessage("Requesting save file from host...");
+        BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT -> HOST: Requesting save file (PlayerId: {playerId})");
 
         var packet = new SaveFileRequestPacket { PlayerId = playerId };
         networkManager.SendToServer(packet);
+
+        BannerBrosModule.LogMessage("[SaveTransfer] Save file request packet sent");
     }
 
     /// <summary>
@@ -81,26 +100,38 @@ public class SaveFileTransferManager
     /// </summary>
     private void HandleSaveFileRequest(SaveFileRequestPacket packet, int peerId)
     {
-        var networkManager = NetworkManager.Instance;
-        if (networkManager == null || !networkManager.IsHost) return;
+        BannerBrosModule.LogMessage($"[SaveTransfer] HOST: Received save file request from peer {peerId} (PlayerId: {packet.PlayerId})");
 
-        BannerBrosModule.LogMessage($"Player {packet.PlayerId} requested save file");
+        var networkManager = NetworkManager.Instance;
+        if (networkManager == null)
+        {
+            BannerBrosModule.LogMessage("[SaveTransfer] HOST: NetworkManager is null!");
+            return;
+        }
+        if (!networkManager.IsHost)
+        {
+            BannerBrosModule.LogMessage("[SaveTransfer] HOST: We are not the host, ignoring request");
+            return;
+        }
 
         try
         {
             // Get current save file path
             var savePath = GetCurrentSavePath();
+            BannerBrosModule.LogMessage($"[SaveTransfer] HOST: Found save file: {savePath ?? "NULL"}");
+
             if (string.IsNullOrEmpty(savePath) || !File.Exists(savePath))
             {
-                BannerBrosModule.LogMessage("Error: No save file found to transfer");
+                BannerBrosModule.LogMessage("[SaveTransfer] HOST ERROR: No save file found to transfer!");
                 return;
             }
 
+            BannerBrosModule.LogMessage($"[SaveTransfer] HOST: Starting transfer of {savePath}");
             SendSaveFile(peerId, savePath);
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Error handling save file request: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] HOST ERROR: {ex.Message}");
         }
     }
 
@@ -173,7 +204,7 @@ public class SaveFileTransferManager
             var checksum = ComputeChecksum(fileData);
             var totalChunks = (int)Math.Ceiling((double)fileData.Length / ChunkSize);
 
-            BannerBrosModule.LogMessage($"Sending save file: {fileInfo.Name} ({fileData.Length} bytes, {totalChunks} chunks)");
+            BannerBrosModule.LogMessage($"[SaveTransfer] HOST -> CLIENT: Sending {fileInfo.Name} ({fileData.Length} bytes, {totalChunks} chunks)");
 
             // Send start packet
             var startPacket = new SaveFileStartPacket
@@ -224,7 +255,7 @@ public class SaveFileTransferManager
     /// </summary>
     private void HandleSaveFileStart(SaveFileStartPacket packet)
     {
-        BannerBrosModule.LogMessage($"Receiving save file: {packet.SaveFileName} ({packet.TotalSize} bytes)");
+        BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Received START - {packet.SaveFileName} ({packet.TotalSize} bytes, {packet.TotalChunks} chunks)");
 
         ResetReceiveState();
 
@@ -257,7 +288,7 @@ public class SaveFileTransferManager
 
         if (_receivedChunkCount % 10 == 0 || _receivedChunkCount == _expectedTotalChunks)
         {
-            BannerBrosModule.LogMessage($"Save file progress: {_receivedChunkCount}/{_expectedTotalChunks} chunks ({progress * 100:F0}%)");
+            BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Progress {_receivedChunkCount}/{_expectedTotalChunks} ({progress * 100:F0}%)");
         }
     }
 
@@ -266,9 +297,15 @@ public class SaveFileTransferManager
     /// </summary>
     private void HandleSaveFileComplete(SaveFileCompletePacket packet)
     {
-        if (!IsReceiving) return;
+        BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Received COMPLETE signal for {packet.SaveFileName}");
 
-        BannerBrosModule.LogMessage("Save file transfer complete, verifying...");
+        if (!IsReceiving)
+        {
+            BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: WARNING - Not in receiving state!");
+            return;
+        }
+
+        BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: Verifying checksum...");
 
         try
         {
@@ -291,11 +328,13 @@ public class SaveFileTransferManager
             var checksum = ComputeChecksum(fileData);
             if (checksum != _expectedChecksum)
             {
-                BannerBrosModule.LogMessage($"Checksum mismatch! Expected: {_expectedChecksum}, Got: {checksum}");
+                BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT ERROR: Checksum mismatch! Expected: {_expectedChecksum}, Got: {checksum}");
                 OnTransferError?.Invoke("Save file corrupted during transfer");
                 ResetReceiveState();
                 return;
             }
+
+            BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: Checksum verified OK");
 
             // Write to temp file in save directory
             var savesDir = Path.Combine(
@@ -313,7 +352,9 @@ public class SaveFileTransferManager
 
             File.WriteAllBytes(savePath, fileData);
 
-            BannerBrosModule.LogMessage($"Save file written to: {savePath}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Save file written to: {savePath}");
+            BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: *** TRANSFER COMPLETE ***");
+            BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: Please load this save from the Load Game menu");
 
             // Notify that save is ready
             OnSaveFileReady?.Invoke(savePath);
@@ -322,6 +363,7 @@ public class SaveFileTransferManager
             var networkManager = NetworkManager.Instance;
             if (networkManager != null)
             {
+                BannerBrosModule.LogMessage("[SaveTransfer] CLIENT -> HOST: Sending confirmation");
                 var confirmPacket = new SaveFileReceivedPacket
                 {
                     PlayerId = networkManager.LocalPeerId,
@@ -332,7 +374,7 @@ public class SaveFileTransferManager
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Error processing save file: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT ERROR: {ex.Message}");
             OnTransferError?.Invoke($"Error processing save file: {ex.Message}");
         }
         finally

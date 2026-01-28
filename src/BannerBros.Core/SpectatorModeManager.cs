@@ -33,9 +33,15 @@ public class SpectatorModeManager
     public void Initialize()
     {
         var networkManager = NetworkManager.Instance;
-        if (networkManager == null) return;
+        if (networkManager == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Initialize failed: NetworkManager is null");
+            return;
+        }
 
+        BannerBrosModule.LogMessage("[Spectator] Initializing SpectatorModeManager");
         networkManager.Messages.OnPartyAssignmentReceived += HandlePartyAssignment;
+        BannerBrosModule.LogMessage("[Spectator] Party assignment handler registered");
     }
 
     public void Cleanup()
@@ -54,9 +60,15 @@ public class SpectatorModeManager
     /// </summary>
     public void EnterSpectatorMode()
     {
-        if (IsSpectatorMode) return;
+        BannerBrosModule.LogMessage("[Spectator] EnterSpectatorMode called");
 
-        BannerBrosModule.LogMessage("Entering spectator mode...");
+        if (IsSpectatorMode)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Already in spectator mode, skipping");
+            return;
+        }
+
+        BannerBrosModule.LogMessage("[Spectator] Entering spectator mode...");
 
         try
         {
@@ -78,9 +90,10 @@ public class SpectatorModeManager
             OnSpectatorModeEntered?.Invoke();
 
             // Notify host that we're ready for party assignment
+            BannerBrosModule.LogMessage("[Spectator] Notifying host we're ready...");
             NotifyHostSpectatorReady();
 
-            BannerBrosModule.LogMessage("Spectator mode entered - waiting for party assignment");
+            BannerBrosModule.LogMessage("[Spectator] *** SPECTATOR MODE ACTIVE - Waiting for party assignment ***");
         }
         catch (Exception ex)
         {
@@ -202,10 +215,26 @@ public class SpectatorModeManager
     {
         var networkManager = NetworkManager.Instance;
         var module = BannerBrosModule.Instance;
-        if (networkManager == null || module == null) return;
+
+        if (networkManager == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot notify host: NetworkManager is null");
+            return;
+        }
+        if (module == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot notify host: Module is null");
+            return;
+        }
 
         var localPlayer = module.PlayerManager.GetLocalPlayer();
-        if (localPlayer == null) return;
+        if (localPlayer == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot notify host: LocalPlayer is null");
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"[Spectator] CLIENT -> HOST: Sending SpectatorReady (PlayerId: {localPlayer.NetworkId}, Name: {localPlayer.Name})");
 
         var packet = new SpectatorReadyPacket
         {
@@ -214,6 +243,7 @@ public class SpectatorModeManager
         };
 
         networkManager.SendToServer(packet);
+        BannerBrosModule.LogMessage("[Spectator] SpectatorReady packet sent");
     }
 
     /// <summary>
@@ -221,13 +251,29 @@ public class SpectatorModeManager
     /// </summary>
     private void HandlePartyAssignment(PartyAssignmentPacket packet)
     {
+        BannerBrosModule.LogMessage($"[Spectator] CLIENT: Received PartyAssignment packet (PartyId: {packet.PartyId}, PlayerId: {packet.PlayerId})");
+
         var module = BannerBrosModule.Instance;
-        if (module == null) return;
+        if (module == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot process: Module is null");
+            return;
+        }
 
         var localPlayer = module.PlayerManager.GetLocalPlayer();
-        if (localPlayer == null || packet.PlayerId != localPlayer.NetworkId) return;
+        if (localPlayer == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Cannot process: LocalPlayer is null");
+            return;
+        }
 
-        BannerBrosModule.LogMessage($"Received party assignment: {packet.PartyId}");
+        if (packet.PlayerId != localPlayer.NetworkId)
+        {
+            BannerBrosModule.LogMessage($"[Spectator] Ignoring: packet PlayerId {packet.PlayerId} != our ID {localPlayer.NetworkId}");
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"[Spectator] *** PARTY ASSIGNED: {packet.PartyId} ***");
 
         AssignedPartyId = packet.PartyId;
         AssignedHeroId = packet.HeroId;

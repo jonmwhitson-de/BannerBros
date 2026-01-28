@@ -28,7 +28,18 @@ public class CommandHandler
     public void Initialize()
     {
         var networkManager = NetworkManager.Instance;
-        if (networkManager == null || !networkManager.IsHost) return;
+        if (networkManager == null)
+        {
+            BannerBrosModule.LogMessage("[CommandHandler] Initialize failed: NetworkManager is null");
+            return;
+        }
+        if (!networkManager.IsHost)
+        {
+            BannerBrosModule.LogMessage("[CommandHandler] Initialize skipped: Not the host");
+            return;
+        }
+
+        BannerBrosModule.LogMessage("[CommandHandler] HOST: Initializing command handlers");
 
         networkManager.Messages.OnMoveCommandReceived += HandleMoveCommand;
         networkManager.Messages.OnEnterSettlementCommandReceived += HandleEnterSettlementCommand;
@@ -36,6 +47,8 @@ public class CommandHandler
         networkManager.Messages.OnAttackCommandReceived += HandleAttackCommand;
         networkManager.Messages.OnFollowCommandReceived += HandleFollowCommand;
         networkManager.Messages.OnSpectatorReadyReceived += HandleSpectatorReady;
+
+        BannerBrosModule.LogMessage("[CommandHandler] HOST: All command handlers registered");
     }
 
     public void Cleanup()
@@ -56,7 +69,7 @@ public class CommandHandler
     /// </summary>
     private void HandleSpectatorReady(SpectatorReadyPacket packet, int peerId)
     {
-        BannerBrosModule.LogMessage($"Player {packet.PlayerName} (ID: {packet.PlayerId}) is ready as spectator");
+        BannerBrosModule.LogMessage($"[CommandHandler] HOST: Received SpectatorReady from {packet.PlayerName} (PlayerId: {packet.PlayerId}, PeerId: {peerId})");
 
         var player = _playerManager.GetPlayer(packet.PlayerId);
         if (player == null)
