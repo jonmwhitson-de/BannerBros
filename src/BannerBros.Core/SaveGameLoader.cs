@@ -60,32 +60,63 @@ public static class SaveGameLoader
     {
         try
         {
-            // Try MBSaveLoad.GetSaveFiles()
             var mbSaveLoadType = typeof(MBSubModuleBase).Assembly.GetType("TaleWorlds.MountAndBlade.MBSaveLoad");
-            if (mbSaveLoadType != null)
+            if (mbSaveLoadType == null)
             {
-                var getSaveFilesMethod = mbSaveLoadType.GetMethod("GetSaveFiles", BindingFlags.Public | BindingFlags.Static);
-                if (getSaveFilesMethod != null)
-                {
-                    var saveFiles = getSaveFilesMethod.Invoke(null, null) as System.Collections.IEnumerable;
-                    if (saveFiles != null)
-                    {
-                        foreach (var saveFile in saveFiles)
-                        {
-                            var nameProperty = saveFile.GetType().GetProperty("Name");
-                            var name = nameProperty?.GetValue(saveFile) as string;
+                BannerBrosModule.LogMessage("[SaveLoader] MBSaveLoad type not found");
+                return null;
+            }
 
-                            if (name != null && name.Equals(saveName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                BannerBrosModule.LogMessage($"[SaveLoader] Found save in list: {name}");
-                                return saveFile;
-                            }
-                        }
-                    }
+            // Try to refresh the save list first
+            var refreshMethod = mbSaveLoadType.GetMethod("RefreshSaveFiles", BindingFlags.Public | BindingFlags.Static);
+            if (refreshMethod != null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] Refreshing save file list...");
+                refreshMethod.Invoke(null, null);
+            }
+
+            var getSaveFilesMethod = mbSaveLoadType.GetMethod("GetSaveFiles", BindingFlags.Public | BindingFlags.Static);
+            if (getSaveFilesMethod == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] GetSaveFiles method not found");
+                return null;
+            }
+
+            var saveFiles = getSaveFilesMethod.Invoke(null, null) as System.Collections.IEnumerable;
+            if (saveFiles == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] GetSaveFiles returned null");
+                return null;
+            }
+
+            // List all saves for debugging
+            BannerBrosModule.LogMessage($"[SaveLoader] Looking for: '{saveName}'");
+            BannerBrosModule.LogMessage("[SaveLoader] Available saves:");
+
+            object? foundSave = null;
+            int count = 0;
+            foreach (var saveFile in saveFiles)
+            {
+                var nameProperty = saveFile.GetType().GetProperty("Name");
+                var name = nameProperty?.GetValue(saveFile) as string ?? "(unknown)";
+                BannerBrosModule.LogMessage($"[SaveLoader]   - {name}");
+                count++;
+
+                if (name.Equals(saveName, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundSave = saveFile;
+                    BannerBrosModule.LogMessage($"[SaveLoader] *** MATCH FOUND ***");
                 }
             }
 
-            BannerBrosModule.LogMessage("[SaveLoader] Save not found via GetSaveFiles");
+            BannerBrosModule.LogMessage($"[SaveLoader] Total saves: {count}");
+
+            if (foundSave != null)
+            {
+                return foundSave;
+            }
+
+            BannerBrosModule.LogMessage($"[SaveLoader] Save '{saveName}' not in list");
         }
         catch (Exception ex)
         {
