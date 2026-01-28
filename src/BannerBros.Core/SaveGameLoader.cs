@@ -999,22 +999,56 @@ public static class SaveGameLoader
                 return false;
             }
 
+            // Log ALL methods for debugging
+            var allMethods = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
+            BannerBrosModule.LogMessage($"[SaveLoader] SandBoxSaveHelper ALL methods ({allMethods.Length}):");
+            foreach (var m in allMethods.Where(x => x.DeclaringType == helperType))
+            {
+                var p = m.GetParameters();
+                BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+            }
+
+            // Check if save is disabled first
+            var isDisabledMethod = helperType.GetMethod("GetIsDisabledWithReason", BindingFlags.Public | BindingFlags.Static);
+            if (isDisabledMethod != null)
+            {
+                try
+                {
+                    var disabledParams = isDisabledMethod.GetParameters();
+                    BannerBrosModule.LogMessage($"[SaveLoader] GetIsDisabledWithReason params: {string.Join(", ", disabledParams.Select(p => p.ParameterType.Name))}");
+
+                    // Call with out parameter
+                    var args = new object?[disabledParams.Length];
+                    args[0] = saveFileInfo;
+                    for (int i = 1; i < disabledParams.Length; i++)
+                    {
+                        args[i] = null; // Out parameters
+                    }
+
+                    var isDisabled = isDisabledMethod.Invoke(null, args);
+                    BannerBrosModule.LogMessage($"[SaveLoader] GetIsDisabledWithReason returned: {isDisabled}");
+
+                    // Check the out parameter (reason text)
+                    if (args.Length > 1 && args[1] != null)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader] Disabled reason: {args[1]}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] GetIsDisabledWithReason error: {ex.Message}");
+                }
+            }
+
             // Try multiple load methods - prioritize LoadGameAction (which actually loads)
             // TryLoadSave might have precondition checks that silently fail
             var methodNames = new[] { "LoadGameAction", "LoadSaveGame", "TryLoadSave" };
-            var methods = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+            var methods = allMethods
                 .Where(m => methodNames.Contains(m.Name))
                 .OrderBy(m => Array.IndexOf(methodNames, m.Name)) // Priority order
                 .ToList();
 
-            BannerBrosModule.LogMessage($"[SaveLoader] Found {methods.Count} load methods");
-
-            // Log all available methods first
-            foreach (var m in methods)
-            {
-                var p = m.GetParameters();
-                BannerBrosModule.LogMessage($"[SaveLoader]   Available: {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
-            }
+            BannerBrosModule.LogMessage($"[SaveLoader] Found {methods.Count} load methods matching our targets");
 
             foreach (var method in methods)
             {
@@ -1034,15 +1068,23 @@ public static class SaveGameLoader
                     else if (parameters.Length == 2)
                     {
                         // Second param is usually Action<LoadGameResult> callback
-                        result = method.Invoke(null, new object?[] { saveFileInfo, null });
+                        // Try with actual callback first
+                        var callback = CreateLoadResultCallback(parameters[1].ParameterType);
+                        result = method.Invoke(null, new object?[] { saveFileInfo, callback });
                         BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(2 params) called! Result: {result}");
                         return true;
                     }
                     else if (parameters.Length == 3)
                     {
                         // TryLoadSave(SaveGameFileInfo, Action<LoadResult>, Action) or similar
-                        result = method.Invoke(null, new object?[] { saveFileInfo, null, null });
+                        // The callbacks might be REQUIRED for the load to proceed!
+                        var callback1 = CreateLoadResultCallback(parameters[1].ParameterType);
+                        Action callback2 = () => BannerBrosModule.LogMessage("[SaveLoader] OnLoadComplete callback fired!");
+
+                        BannerBrosModule.LogMessage($"[SaveLoader] Calling with actual callbacks...");
+                        result = method.Invoke(null, new object?[] { saveFileInfo, callback1, callback2 });
                         BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(3 params) called! Result: {result}");
+
                         // Don't return immediately - check if it actually worked
                         if (result is bool b && !b)
                         {
@@ -1064,6 +1106,59 @@ public static class SaveGameLoader
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Creates a callback delegate for load result types (Action&lt;T&gt;).
+    /// </summary>
+    private static object? CreateLoadResultCallback(Type parameterType)
+    {
+        try
+        {
+            // Check if it's an Action<T> type
+            if (!parameterType.IsGenericType || parameterType.GetGenericTypeDefinition() != typeof(Action<>))
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] Parameter is not Action<T>: {parameterType.Name}");
+                return null;
+            }
+
+            var genericArg = parameterType.GetGenericArguments()[0];
+            BannerBrosModule.LogMessage($"[SaveLoader] Creating callback for Action<{genericArg.Name}>");
+
+            // Create a lambda that logs the result
+            // We use Expression trees to create a typed delegate
+            var param = System.Linq.Expressions.Expression.Parameter(genericArg, "result");
+
+            // Create the body: BannerBrosModule.LogMessage($"[SaveLoader] Load callback received: {result}")
+            var logMethod = typeof(BannerBrosModule).GetMethod("LogMessage", BindingFlags.Public | BindingFlags.Static);
+            if (logMethod == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] LogMessage method not found");
+                return null;
+            }
+
+            // Build: "[SaveLoader] Load callback received: " + result.ToString()
+            var prefixExpr = System.Linq.Expressions.Expression.Constant("[SaveLoader] Load callback received: ");
+            var toStringMethod = typeof(object).GetMethod("ToString");
+            var resultToString = System.Linq.Expressions.Expression.Call(
+                System.Linq.Expressions.Expression.Convert(param, typeof(object)),
+                toStringMethod!);
+            var concatMethod = typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) });
+            var messageExpr = System.Linq.Expressions.Expression.Call(concatMethod!, prefixExpr, resultToString);
+
+            var callLogExpr = System.Linq.Expressions.Expression.Call(logMethod, messageExpr);
+
+            var lambda = System.Linq.Expressions.Expression.Lambda(parameterType, callLogExpr, param);
+            var callback = lambda.Compile();
+
+            BannerBrosModule.LogMessage($"[SaveLoader] Created callback delegate successfully");
+            return callback;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] Failed to create callback: {ex.Message}");
+            return null;
+        }
     }
 
     private static bool TryLoadViaMBSaveLoad(object saveFileInfo)

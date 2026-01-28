@@ -152,13 +152,42 @@ Client receives save file from host but cannot auto-load it into the game. The g
 
 ### Attempt 9: Try LoadGameAction first, check return values
 **Date:** 2026-01-28
+**Commit:** bac0757
+**Result:** ❌ Failed - TryLoadSave called but does nothing
+**Details:**
+- Log showed only `TryLoadSave` method found (not LoadGameAction)
+- TryLoadSave was called successfully (no errors)
+- Return value was empty (void method)
+- No module dialog appeared, nothing happened
+- Passing `null` for callback parameters may prevent load
+
+**Log evidence:**
+```
+[SaveLoader] Found 1 load methods
+[SaveLoader]   Available: TryLoadSave(SaveGameFileInfo, Action`1, Action)
+[SaveLoader] Trying TryLoadSave(SaveGameFileInfo, Action`1, Action)...
+[SaveLoader] TryLoadSave(3 params) called! Result:
+[SaveLoader] Save loading initiated!
+... (nothing happens)
+```
+
+---
+
+### Attempt 10: Pass actual callbacks + check GetIsDisabledWithReason
+**Date:** 2026-01-28
 **Commit:** (pending)
 **Result:** 🔄 Pending
 **Details:**
-- Prioritize LoadGameAction over TryLoadSave
-- Log return value of each method
-- If TryLoadSave returns false, try next method
-- Log all available methods upfront
+- Hypothesis: Passing `null` for callback params prevents load from proceeding
+- Create actual `Action<T>` callbacks via Expression trees
+- Log ALL SandBoxSaveHelper methods (not just load methods)
+- Call `GetIsDisabledWithReason` to check if save is blocked
+- Check why only TryLoadSave found when LoadGameAction should exist
+
+**Changes:**
+- Added `CreateLoadResultCallback()` to build typed delegates
+- Added check for `GetIsDisabledWithReason` before attempting load
+- Log all methods on SandBoxSaveHelper class
 
 ---
 
