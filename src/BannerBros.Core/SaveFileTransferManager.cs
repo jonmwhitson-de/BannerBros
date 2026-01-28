@@ -145,6 +145,7 @@ public class SaveFileTransferManager
 
     /// <summary>
     /// Triggers a quicksave on the host to ensure fresh save for transfer.
+    /// Waits for the save to complete before returning.
     /// </summary>
     private void TriggerQuickSave()
     {
@@ -157,6 +158,12 @@ public class SaveFileTransferManager
                 return;
             }
 
+            // Get timestamp of most recent save before triggering new one
+            var savesBefore = GetRecentSaveTimestamp();
+            BannerBrosModule.LogMessage($"[SaveTransfer] Most recent save before quicksave: {savesBefore:HH:mm:ss}");
+
+            bool triggered = false;
+
             // Try Campaign.Current.SaveHandler.QuickSaveCurrentGame() via reflection
             var saveHandler = campaign.GetType().GetProperty("SaveHandler")?.GetValue(campaign);
             if (saveHandler != null)
@@ -166,30 +173,85 @@ public class SaveFileTransferManager
                 {
                     quickSaveMethod.Invoke(saveHandler, null);
                     BannerBrosModule.LogMessage("[SaveTransfer] Quicksave triggered via SaveHandler");
-                    return;
+                    triggered = true;
                 }
             }
 
             // Alternative: Try CampaignSaveSystemClass (older API)
-            var saveSystemType = typeof(TaleWorlds.CampaignSystem.Campaign).Assembly
-                .GetType("TaleWorlds.CampaignSystem.CampaignSaveSystem");
-            if (saveSystemType != null)
+            if (!triggered)
             {
-                var quickSaveMethod = saveSystemType.GetMethod("QuickSave",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (quickSaveMethod != null)
+                var saveSystemType = typeof(TaleWorlds.CampaignSystem.Campaign).Assembly
+                    .GetType("TaleWorlds.CampaignSystem.CampaignSaveSystem");
+                if (saveSystemType != null)
                 {
-                    quickSaveMethod.Invoke(null, null);
-                    BannerBrosModule.LogMessage("[SaveTransfer] Quicksave triggered via CampaignSaveSystem");
+                    var quickSaveMethod = saveSystemType.GetMethod("QuickSave",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                    if (quickSaveMethod != null)
+                    {
+                        quickSaveMethod.Invoke(null, null);
+                        BannerBrosModule.LogMessage("[SaveTransfer] Quicksave triggered via CampaignSaveSystem");
+                        triggered = true;
+                    }
+                }
+            }
+
+            if (!triggered)
+            {
+                BannerBrosModule.LogMessage("[SaveTransfer] WARNING: Could not trigger quicksave - using existing save");
+                return;
+            }
+
+            // Wait for the save to complete (poll for new file)
+            BannerBrosModule.LogMessage("[SaveTransfer] Waiting for quicksave to complete...");
+            for (int i = 0; i < 20; i++) // Wait up to 10 seconds
+            {
+                System.Threading.Thread.Sleep(500);
+                var savesAfter = GetRecentSaveTimestamp();
+                if (savesAfter > savesBefore)
+                {
+                    BannerBrosModule.LogMessage($"[SaveTransfer] Quicksave completed at {savesAfter:HH:mm:ss}");
                     return;
                 }
             }
 
-            BannerBrosModule.LogMessage("[SaveTransfer] WARNING: Could not trigger quicksave - using existing save");
+            BannerBrosModule.LogMessage("[SaveTransfer] WARNING: Quicksave may not have completed - proceeding anyway");
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[SaveTransfer] Quicksave error (non-fatal): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets the timestamp of the most recently modified save file.
+    /// </summary>
+    private DateTime GetRecentSaveTimestamp()
+    {
+        try
+        {
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var possibleDirs = new[]
+            {
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves", "Native"),
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves"),
+            };
+
+            DateTime newest = DateTime.MinValue;
+            foreach (var dir in possibleDirs)
+            {
+                if (!Directory.Exists(dir)) continue;
+                var files = Directory.GetFiles(dir, "*.sav");
+                foreach (var file in files)
+                {
+                    var modified = File.GetLastWriteTime(file);
+                    if (modified > newest) newest = modified;
+                }
+            }
+            return newest;
+        }
+        catch
+        {
+            return DateTime.MinValue;
         }
     }
 
@@ -417,13 +479,25 @@ public class SaveFileTransferManager
 
             BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: Checksum verified OK");
 
-            // Write to temp file in save directory
-            var savesDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "Mount and Blade II Bannerlord",
-                "Game Saves",
-                "Native"
-            );
+            // Write to save directory - check which one exists
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var possibleDirs = new[]
+            {
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves", "Native"),
+                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves"),
+            };
+
+            // Use existing directory, or create Native one
+            string savesDir = possibleDirs[0]; // Default to Native
+            foreach (var dir in possibleDirs)
+            {
+                if (Directory.Exists(dir))
+                {
+                    savesDir = dir;
+                    BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Using existing save directory: {dir}");
+                    break;
+                }
+            }
 
             Directory.CreateDirectory(savesDir);
 
