@@ -479,25 +479,11 @@ public class SaveFileTransferManager
 
             BannerBrosModule.LogMessage("[SaveTransfer] CLIENT: Checksum verified OK");
 
-            // Write to save directory - check which one exists
+            // Write to save directory - use the main Game Saves folder (not Native subfolder)
+            // The game's internal save list scans Game Saves\, not Game Saves\Native\
             var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            var possibleDirs = new[]
-            {
-                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves", "Native"),
-                Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves"),
-            };
-
-            // Use existing directory, or create Native one
-            string savesDir = possibleDirs[0]; // Default to Native
-            foreach (var dir in possibleDirs)
-            {
-                if (Directory.Exists(dir))
-                {
-                    savesDir = dir;
-                    BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Using existing save directory: {dir}");
-                    break;
-                }
-            }
+            var savesDir = Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "Game Saves");
+            BannerBrosModule.LogMessage($"[SaveTransfer] CLIENT: Using save directory: {savesDir}");
 
             Directory.CreateDirectory(savesDir);
 

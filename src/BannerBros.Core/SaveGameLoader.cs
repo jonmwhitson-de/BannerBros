@@ -870,7 +870,7 @@ public static class SaveGameLoader
     {
         try
         {
-            BannerBrosModule.LogMessage("[SaveLoader] Trying SandBoxSaveHelper.LoadSaveGame...");
+            BannerBrosModule.LogMessage("[SaveLoader] Trying SandBoxSaveHelper methods...");
 
             var sandboxAssembly = AppDomain.CurrentDomain.GetAssemblies()
                 .FirstOrDefault(a => a.GetName().Name == "SandBox");
@@ -888,38 +888,46 @@ public static class SaveGameLoader
                 return false;
             }
 
-            // Find LoadSaveGame method
+            // Try multiple load methods: LoadSaveGame, TryLoadSave, LoadGameAction
+            var methodNames = new[] { "LoadSaveGame", "TryLoadSave", "LoadGameAction" };
             var methods = helperType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .Where(m => m.Name == "LoadSaveGame")
+                .Where(m => methodNames.Contains(m.Name))
                 .ToList();
 
-            BannerBrosModule.LogMessage($"[SaveLoader] Found {methods.Count} LoadSaveGame methods");
+            BannerBrosModule.LogMessage($"[SaveLoader] Found {methods.Count} load methods");
 
             foreach (var method in methods)
             {
                 var parameters = method.GetParameters();
                 var paramStr = string.Join(", ", parameters.Select(p => p.ParameterType.Name));
-                BannerBrosModule.LogMessage($"[SaveLoader] Trying LoadSaveGame({paramStr})");
+                BannerBrosModule.LogMessage($"[SaveLoader] Trying {method.Name}({paramStr})");
 
                 try
                 {
                     if (parameters.Length == 1)
                     {
                         method.Invoke(null, new object[] { saveFileInfo });
-                        BannerBrosModule.LogMessage("[SaveLoader] LoadSaveGame(1 param) called!");
+                        BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(1 param) called!");
                         return true;
                     }
                     else if (parameters.Length == 2)
                     {
                         // Second param is usually Action<LoadGameResult> callback
                         method.Invoke(null, new object?[] { saveFileInfo, null });
-                        BannerBrosModule.LogMessage("[SaveLoader] LoadSaveGame(2 params) called!");
+                        BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(2 params) called!");
+                        return true;
+                    }
+                    else if (parameters.Length == 3)
+                    {
+                        // TryLoadSave(SaveGameFileInfo, Action<LoadResult>, Action) or similar
+                        method.Invoke(null, new object?[] { saveFileInfo, null, null });
+                        BannerBrosModule.LogMessage($"[SaveLoader] {method.Name}(3 params) called!");
                         return true;
                     }
                 }
                 catch (Exception ex)
                 {
-                    BannerBrosModule.LogMessage($"[SaveLoader] Method failed: {ex.InnerException?.Message ?? ex.Message}");
+                    BannerBrosModule.LogMessage($"[SaveLoader] {method.Name} failed: {ex.InnerException?.Message ?? ex.Message}");
                 }
             }
         }
