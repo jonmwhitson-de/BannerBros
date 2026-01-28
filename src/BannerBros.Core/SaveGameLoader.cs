@@ -1220,11 +1220,200 @@ public static class SaveGameLoader
                 }
             }
 
+            // If successful, try to start the loaded game!
+            if (successProp != null && (bool)(successProp.GetValue(result) ?? false))
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] Load successful! Attempting to start the game...");
+                TryStartLoadedGame(result);
+            }
+
             BannerBrosModule.LogMessage($"[SaveLoader] === END LOAD RESULT ===");
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[SaveLoader] Error logging LoadResult: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Attempts to start the game with the loaded data from LoadResult.
+    /// </summary>
+    private static void TryStartLoadedGame(object loadResult)
+    {
+        try
+        {
+            var type = loadResult.GetType();
+
+            // Get the LoadCallbackInitializator
+            var initializatorField = type.GetField("_loadCallbackInitializator", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (initializatorField != null)
+            {
+                var initializator = initializatorField.GetValue(loadResult);
+                if (initializator != null)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found LoadCallbackInitializator: {initializator.GetType().FullName}");
+
+                    // Log all methods on the initializator
+                    var initType = initializator.GetType();
+                    var initMethods = initType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    BannerBrosModule.LogMessage($"[SaveLoader] LoadCallbackInitializator methods ({initMethods.Length}):");
+                    foreach (var m in initMethods.Where(x => x.DeclaringType == initType || x.DeclaringType?.Name?.Contains("Load") == true))
+                    {
+                        var p = m.GetParameters();
+                        BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+                    }
+
+                    // Try to find and call initialization methods
+                    var startMethods = new[] { "InitializeAndCreateGame", "Initialize", "CreateGame", "Start", "Run", "Execute", "Finish", "Complete" };
+                    foreach (var methodName in startMethods)
+                    {
+                        var method = initType.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (method != null)
+                        {
+                            var methodParams = method.GetParameters();
+                            BannerBrosModule.LogMessage($"[SaveLoader] Found {methodName}({string.Join(", ", methodParams.Select(p => p.ParameterType.Name))})");
+
+                            if (methodParams.Length == 0)
+                            {
+                                BannerBrosModule.LogMessage($"[SaveLoader] Calling {methodName}()...");
+                                var result = method.Invoke(initializator, null);
+                                BannerBrosModule.LogMessage($"[SaveLoader] {methodName}() returned: {result}");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Get the Root (loaded Game object)
+            var rootProp = type.GetProperty("Root");
+            if (rootProp != null)
+            {
+                var loadedGame = rootProp.GetValue(loadResult);
+                if (loadedGame != null)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Got loaded Game object: {loadedGame.GetType().FullName}");
+
+                    // Log methods on the Game object
+                    var gameType = loadedGame.GetType();
+                    var gameMethods = gameType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                        .Where(m => m.Name.Contains("Start") || m.Name.Contains("Initialize") || m.Name.Contains("Load") || m.Name.Contains("Activate"))
+                        .Take(10)
+                        .ToArray();
+                    BannerBrosModule.LogMessage($"[SaveLoader] Game relevant methods:");
+                    foreach (var m in gameMethods)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
+                    }
+
+                    // Try to start the game using MBGameManager
+                    TryStartGameViaMBGameManager(loadedGame);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] TryStartLoadedGame error: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveLoader] Stack: {ex.StackTrace}");
+        }
+    }
+
+    /// <summary>
+    /// Tries to start the game using MBGameManager or similar.
+    /// </summary>
+    private static void TryStartGameViaMBGameManager(object loadedGame)
+    {
+        try
+        {
+            BannerBrosModule.LogMessage("[SaveLoader] Looking for ways to start the loaded game...");
+
+            // Try SandBoxGameManager
+            var sandboxAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "SandBox");
+
+            if (sandboxAssembly != null)
+            {
+                // Look for SaveLoad class
+                var saveLoadType = sandboxAssembly.GetType("SandBox.View.SaveLoad");
+                if (saveLoadType == null)
+                {
+                    saveLoadType = sandboxAssembly.GetTypes()
+                        .FirstOrDefault(t => t.Name == "SaveLoad" || t.Name == "SandBoxSaveLoad");
+                }
+
+                if (saveLoadType != null)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found SaveLoad type: {saveLoadType.FullName}");
+
+                    // Look for OnLoadingFinished or similar
+                    var methods = saveLoadType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic)
+                        .Where(m => m.Name.Contains("Load") || m.Name.Contains("Start") || m.Name.Contains("Finish"))
+                        .ToArray();
+
+                    foreach (var m in methods)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
+                    }
+                }
+
+                // Look for SandBoxGameManager
+                var gameManagerType = sandboxAssembly.GetType("SandBox.SandBoxGameManager");
+                if (gameManagerType != null)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader] Found SandBoxGameManager: {gameManagerType.FullName}");
+
+                    // Look for StartGame or similar methods
+                    var startMethods = gameManagerType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Instance)
+                        .Where(m => m.Name.Contains("Start") || m.Name.Contains("Load") || m.Name.Contains("Begin"))
+                        .ToArray();
+
+                    foreach (var m in startMethods)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
+                    }
+
+                    // Try to find StartGame(Game)
+                    var startGameMethod = gameManagerType.GetMethod("StartGame",
+                        BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic,
+                        null, new[] { loadedGame.GetType() }, null);
+
+                    if (startGameMethod != null)
+                    {
+                        BannerBrosModule.LogMessage("[SaveLoader] Calling SandBoxGameManager.StartGame(Game)...");
+                        startGameMethod.Invoke(null, new[] { loadedGame });
+                        BannerBrosModule.LogMessage("[SaveLoader] StartGame called!");
+                        return;
+                    }
+                }
+            }
+
+            // Try MBGameManager
+            var mbGameManagerType = typeof(MBSubModuleBase).Assembly.GetType("TaleWorlds.MountAndBlade.MBGameManager");
+            if (mbGameManagerType == null)
+            {
+                mbGameManagerType = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } })
+                    .FirstOrDefault(t => t.Name == "MBGameManager");
+            }
+
+            if (mbGameManagerType != null)
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] Found MBGameManager: {mbGameManagerType.FullName}");
+
+                var methods = mbGameManagerType.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Where(m => m.Name.Contains("Start") || m.Name.Contains("Load") || m.Name.Contains("Begin"))
+                    .Take(10)
+                    .ToArray();
+
+                foreach (var m in methods)
+                {
+                    BannerBrosModule.LogMessage($"[SaveLoader]   {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] TryStartGameViaMBGameManager error: {ex.Message}");
         }
     }
 
