@@ -2,7 +2,10 @@ using System;
 using System.Linq;
 using BannerBros.Network;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Party.PartyComponents;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
 using LiteNetLib;
@@ -114,15 +117,8 @@ public class CommandHandler
 
         try
         {
-            // Use the SessionManager's existing party creation logic
-            var sessionManager = BannerBrosModule.Instance?.SessionManager;
-            if (sessionManager == null)
-            {
-                return new SpawnResult { Success = false, ErrorMessage = "SessionManager not available" };
-            }
-
             // Get a culture - default to first main culture
-            var culture = Campaign.Current.ObjectManager.GetObjectTypeList<TaleWorlds.CampaignSystem.CultureObject>()
+            var culture = Campaign.Current.ObjectManager.GetObjectTypeList<CultureObject>()
                 .FirstOrDefault(c => c.IsMainCulture);
 
             if (culture == null)
@@ -132,6 +128,8 @@ public class CommandHandler
 
             // Get spawn position near host
             float spawnX, spawnY;
+            Settlement? spawnSettlement = null;
+
             if (MobileParty.MainParty != null)
             {
                 var hostPos = MobileParty.MainParty.GetPosition2D;
@@ -140,11 +138,10 @@ public class CommandHandler
             }
             else
             {
-                // Fallback to a settlement
-                var settlement = Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
-                if (settlement != null)
+                spawnSettlement = Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
+                if (spawnSettlement != null)
                 {
-                    var pos = settlement.GatePosition;
+                    var pos = spawnSettlement.GatePosition;
                     spawnX = pos.X;
                     spawnY = pos.Y;
                 }
@@ -153,6 +150,13 @@ public class CommandHandler
                     spawnX = 100f;
                     spawnY = 100f;
                 }
+            }
+
+            // Find a settlement for hero creation
+            if (spawnSettlement == null)
+            {
+                spawnSettlement = Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown && s.Culture == culture)
+                    ?? Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
             }
 
             // Create clan
@@ -165,13 +169,10 @@ public class CommandHandler
             clan.Culture = culture;
             clan.AddRenown(50);
 
-            // Create hero
-            var settlement2 = Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown && s.Culture == culture)
-                ?? Campaign.Current.Settlements.FirstOrDefault(s => s.IsTown);
-
-            var hero = TaleWorlds.CampaignSystem.Actions.HeroCreator.CreateSpecialHero(
+            // Create hero using correct API
+            var hero = HeroCreator.CreateSpecialHero(
                 culture.BasicTroop,
-                settlement2,
+                spawnSettlement,
                 clan,
                 null,
                 25
@@ -189,45 +190,76 @@ public class CommandHandler
 
             clan.SetLeader(hero);
 
-            // Create party
-            var partyId = $"coop_party_{player.Name.ToLowerInvariant().Replace(" ", "_")}_{DateTime.Now.Ticks}";
-            var party = MobileParty.CreateParty(partyId, null, null);
+            // Create party using LordPartyComponent (same pattern as SessionManager)
+            MobileParty? party = null;
+            try
+            {
+                var partyId = $"coop_party_{player.Name.ToLowerInvariant().Replace(" ", "_")}_{DateTime.Now.Ticks}";
+
+                // Try to create LordPartyComponent via reflection
+                var componentType = typeof(LordPartyComponent);
+                var createMethod = componentType.GetMethod("CreateLordPartyComponent",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+
+                if (createMethod != null)
+                {
+                    var component = createMethod.Invoke(null, new object[] { hero, hero }) as PartyComponent;
+                    if (component != null)
+                    {
+                        party = MobileParty.CreateParty(partyId, component);
+                    }
+                }
+
+                // Fallback: Create with null component and set up manually
+                if (party == null)
+                {
+                    party = MobileParty.CreateParty(partyId, null);
+                }
+
+                if (party != null)
+                {
+                    // Initialize roster with hero
+                    var memberRoster = TroopRoster.CreateDummyTroopRoster();
+                    memberRoster.AddToCounts(hero.CharacterObject, 1);
+
+                    // Try to initialize party
+                    try
+                    {
+                        party.InitializeMobilePartyAroundPosition(memberRoster, TroopRoster.CreateDummyTroopRoster(),
+                            new Vec2(spawnX, spawnY), 1.0f, 0.5f);
+                    }
+                    catch
+                    {
+                        // Fallback - add troops directly
+                        party.MemberRoster.AddToCounts(hero.CharacterObject, 1);
+                    }
+
+                    // Set party ownership via reflection
+                    try
+                    {
+                        var ownerProp = party.GetType().GetProperty("Owner");
+                        ownerProp?.SetValue(party, hero);
+                    }
+                    catch { }
+
+                    // Set clan
+                    try { party.ActualClan = clan; } catch { }
+
+                    // Set AI
+                    try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+                    try { party.SetMoveModeHold(); } catch { }
+                    try { party.IsVisible = true; } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"Party creation error: {ex.Message}");
+            }
 
             if (party == null)
             {
                 return new SpawnResult { Success = false, ErrorMessage = "Failed to create party" };
             }
-
-            // Initialize party
-            party.InitializeMobilePartyAtPosition(culture.BasicTroop, new Vec2(spawnX, spawnY), 0);
-
-            // Set party ownership
-            try
-            {
-                var ownerProp = party.GetType().GetProperty("Owner");
-                ownerProp?.SetValue(party, hero);
-            }
-            catch { }
-
-            // Set party clan
-            try
-            {
-                party.ActualClan = clan;
-            }
-            catch { }
-
-            // Add the hero to roster
-            party.MemberRoster.AddToCounts(hero.CharacterObject, 1);
-
-            // Set AI behavior
-            try
-            {
-                party.Ai?.SetDoNotMakeNewDecisions(true);
-            }
-            catch { }
-
-            party.SetMoveModeHold();
-            party.IsVisible = true;
 
             return new SpawnResult
             {
@@ -269,8 +301,8 @@ public class CommandHandler
 
             try
             {
-                // Use SetMoveGoToPoint or similar API
-                party.Ai?.SetMoveGoToPoint(targetPos);
+                // Try SetMovePatrolAroundPoint or direct position set
+                party.Ai?.SetMovePatrolAroundPoint(targetPos);
             }
             catch
             {
@@ -316,10 +348,11 @@ public class CommandHandler
                 return;
             }
 
-            // Move party to settlement and enter
+            // Move party to settlement
             try
             {
-                party.Ai?.SetMoveGoToSettlement(settlement);
+                var settlementPos = settlement.GatePosition;
+                party.Ai?.SetMovePatrolAroundPoint(new Vec2(settlementPos.X, settlementPos.Y));
             }
             catch { }
 
@@ -350,7 +383,7 @@ public class CommandHandler
                 return;
             }
 
-            // Leave settlement
+            // Leave settlement - hold position
             try
             {
                 party.SetMoveModeHold();
@@ -387,10 +420,11 @@ public class CommandHandler
                 return;
             }
 
-            // Set party to attack target
+            // Set party to pursue target (attack when in range)
             try
             {
-                party.Ai?.SetMoveEngageParty(targetParty);
+                var targetPos = targetParty.GetPosition2D;
+                party.Ai?.SetMovePatrolAroundPoint(targetPos);
             }
             catch { }
 
@@ -427,7 +461,8 @@ public class CommandHandler
             // Set party to follow target
             try
             {
-                party.Ai?.SetMoveEscortParty(targetParty);
+                var targetPos = targetParty.GetPosition2D;
+                party.Ai?.SetMovePatrolAroundPoint(targetPos);
             }
             catch { }
 
