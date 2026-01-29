@@ -230,11 +230,26 @@ public class NetworkManager : INetEventListener
     /// </summary>
     public void SendToServer<T>(T packet, DeliveryMethod deliveryMethod = DeliveryMethod.ReliableOrdered) where T : class, new()
     {
-        if (!IsRunning || _isHost || _serverPeer == null) return;
+        if (!IsRunning)
+        {
+            BannerBros.Core.BannerBrosModule.LogMessage($"[Network] SendToServer FAILED: Not running");
+            return;
+        }
+        if (_isHost)
+        {
+            BannerBros.Core.BannerBrosModule.LogMessage($"[Network] SendToServer FAILED: We are host");
+            return;
+        }
+        if (_serverPeer == null)
+        {
+            BannerBros.Core.BannerBrosModule.LogMessage($"[Network] SendToServer FAILED: No server peer");
+            return;
+        }
 
         var writer = new NetDataWriter();
         _packetProcessor.Write(writer, packet);
         _serverPeer.Send(writer, deliveryMethod);
+        BannerBros.Core.BannerBrosModule.LogMessage($"[Network] Sent {typeof(T).Name} to server");
     }
 
     /// <summary>
@@ -324,6 +339,7 @@ public class NetworkManager : INetEventListener
         {
             Console.WriteLine($"[BannerBros.Network] ERROR processing packet from peer {peer.Id}: {ex.Message}");
             Console.WriteLine($"[BannerBros.Network] Stack trace: {ex.StackTrace}");
+            BannerBros.Core.BannerBrosModule.LogMessage($"[Network] ERROR processing packet from peer {peer.Id}: {ex.Message}");
         }
     }
 
