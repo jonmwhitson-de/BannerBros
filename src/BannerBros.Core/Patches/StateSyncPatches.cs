@@ -85,7 +85,7 @@ public static class StateSyncPatches
                 if (stateSyncManager?.IsPartySynced(partyId) == true)
                 {
                     // Sync the movement target so clients know where party is going
-                    var pos = __instance.Position2D;
+                    var pos = __instance.GetPosition2D;
                     stateSyncManager.OnServerPartyPositionChanged(partyId, pos.x, pos.y);
                 }
             }
@@ -123,7 +123,7 @@ public static class StateSyncPatches
                 var stateSyncManager = StateSyncManager.Instance;
                 if (stateSyncManager?.IsPartySynced(partyId) == true)
                 {
-                    var pos = __instance.Position2D;
+                    var pos = __instance.GetPosition2D;
                     stateSyncManager.OnServerPartyPositionChanged(partyId, pos.x, pos.y);
                 }
             }

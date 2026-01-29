@@ -181,7 +181,7 @@ public class StateSyncManager
         var timePacket = new StateUpdatePacket
         {
             UpdateType = (byte)StateUpdateType.CampaignTime,
-            FloatValue1 = (float)Campaign.Current.CampaignStartTime.ToHours,
+            FloatValue1 = (float)CampaignTime.Now.ToHours,
             Timestamp = DateTime.UtcNow.Ticks
         };
         NetworkManager.Instance?.SendTo(peerId, timePacket, DeliveryMethod.ReliableOrdered);

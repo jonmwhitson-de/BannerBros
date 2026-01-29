@@ -46,9 +46,7 @@ public static class TimeControlPatches
                 if (IsWaitingForClientLoad) return true;
 
                 // Block any attempt to stop/pause time
-                if (value == CampaignTimeControlMode.Stop ||
-                    value == CampaignTimeControlMode.StoppableFastForwardForPartyWaitTime ||
-                    value == CampaignTimeControlMode.UnstoppableFastForwardForPartyWaitTime)
+                if (value == CampaignTimeControlMode.Stop)
                 {
                     if (!_hasLoggedPauseBlock)
                     {
