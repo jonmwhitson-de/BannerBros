@@ -89,6 +89,11 @@ public class NetworkManager : INetEventListener
 
         // Debug log streaming
         _packetProcessor.SubscribeReusable<DebugLogPacket, NetPeer>(_messageHandler.HandleDebugLog);
+
+        // State synchronization packets (new architecture - no save file transfer)
+        _packetProcessor.SubscribeReusable<StateUpdatePacket, NetPeer>(_messageHandler.HandleStateUpdate);
+        _packetProcessor.SubscribeReusable<StateSyncJoinRequestPacket, NetPeer>(_messageHandler.HandleStateSyncJoinRequest);
+        _packetProcessor.SubscribeReusable<InitialStateSyncPacket, NetPeer>(_messageHandler.HandleInitialStateSync);
     }
 
     public void StartHost(int port, int maxPlayers = 4)
@@ -177,6 +182,14 @@ public class NetworkManager : INetEventListener
                 // Ignore send errors for individual peers
             }
         }
+    }
+
+    /// <summary>
+    /// Sends a packet to all connected peers.
+    /// </summary>
+    public void SendToAll<T>(T packet, DeliveryMethod deliveryMethod = DeliveryMethod.ReliableOrdered) where T : class, new()
+    {
+        Send(packet, deliveryMethod);
     }
 
     public void SendTo<T>(int peerId, T packet, DeliveryMethod deliveryMethod = DeliveryMethod.ReliableOrdered) where T : class, new()

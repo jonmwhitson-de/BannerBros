@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using BannerBros.Core.StateSync;
 using BannerBros.Network;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
@@ -71,6 +72,25 @@ public class CommandHandler
     {
         BannerBrosModule.LogMessage($"[CommandHandler] HOST: Received SpectatorReady from {packet.PlayerName} (PlayerId: {packet.PlayerId}, PeerId: {peerId})");
 
+        // CLIENT HAS LOADED THE SAVE - Resume game time!
+        if (Patches.TimeControlPatches.IsWaitingForClientLoad)
+        {
+            BannerBrosModule.LogMessage("[CommandHandler] HOST: *** CLIENT LOADED - RESUMING GAME ***");
+            Patches.TimeControlPatches.IsWaitingForClientLoad = false;
+
+            // Resume campaign time
+            try
+            {
+                var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+                if (campaign != null)
+                {
+                    campaign.TimeControlMode = TaleWorlds.CampaignSystem.CampaignTimeControlMode.StoppablePlay;
+                    campaign.SetTimeSpeed(1);
+                }
+            }
+            catch { }
+        }
+
         var player = _playerManager.GetPlayer(packet.PlayerId);
         if (player == null)
         {
@@ -92,6 +112,22 @@ public class CommandHandler
                 player.MapPositionY = partyResult.SpawnY;
                 player.State = PlayerState.OnMap;
 
+                // Register party for state synchronization
+                var party = Campaign.Current?.MobileParties
+                    .FirstOrDefault(p => p.StringId == partyResult.PartyId);
+                if (party != null)
+                {
+                    StateSyncManager.Instance.RegisterParty(party);
+                }
+
+                // Also register the hero
+                var hero = Campaign.Current?.AliveHeroes
+                    .FirstOrDefault(h => h.StringId == partyResult.HeroId);
+                if (hero != null)
+                {
+                    StateSyncManager.Instance.RegisterHero(hero);
+                }
+
                 // Send assignment to client
                 var assignmentPacket = new PartyAssignmentPacket
                 {
@@ -104,6 +140,9 @@ public class CommandHandler
                 };
 
                 NetworkManager.Instance?.SendTo(peerId, assignmentPacket, DeliveryMethod.ReliableOrdered);
+
+                // Send full state sync to the new client via StateSyncManager
+                StateSyncManager.Instance.SendFullStateToClient(peerId);
 
                 BannerBrosModule.LogMessage($"Assigned party {partyResult.PartyId} to player {packet.PlayerName}");
             }

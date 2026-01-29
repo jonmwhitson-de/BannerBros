@@ -116,6 +116,23 @@ public class SaveFileTransferManager
 
         try
         {
+            // PAUSE THE GAME while client loads - this keeps worlds synced!
+            // The client may need to manually load, which takes time
+            BannerBrosModule.LogMessage("[SaveTransfer] HOST: *** PAUSING WHILE CLIENT LOADS ***");
+            Patches.TimeControlPatches.IsWaitingForClientLoad = true;
+
+            // Pause campaign time
+            try
+            {
+                var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+                if (campaign != null)
+                {
+                    campaign.TimeControlMode = TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop;
+                    campaign.SetTimeSpeed(0);
+                }
+            }
+            catch { }
+
             // Auto-save before transferring to ensure client gets fresh state
             BannerBrosModule.LogMessage("[SaveTransfer] HOST: Auto-saving before transfer...");
             TriggerQuickSave();
@@ -131,15 +148,20 @@ public class SaveFileTransferManager
             {
                 BannerBrosModule.LogMessage("[SaveTransfer] HOST ERROR: No save file found to transfer!");
                 BannerBrosModule.LogMessage("[SaveTransfer] HOST: Please save your game manually, then have client reconnect");
+                // Resume time since transfer failed
+                Patches.TimeControlPatches.IsWaitingForClientLoad = false;
                 return;
             }
 
             BannerBrosModule.LogMessage($"[SaveTransfer] HOST: Starting transfer of {savePath}");
+            BannerBrosModule.LogMessage("[SaveTransfer] HOST: *** GAME PAUSED - Waiting for client to load save ***");
             SendSaveFile(peerId, savePath);
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[SaveTransfer] HOST ERROR: {ex.Message}");
+            // Resume time on error
+            Patches.TimeControlPatches.IsWaitingForClientLoad = false;
         }
     }
 

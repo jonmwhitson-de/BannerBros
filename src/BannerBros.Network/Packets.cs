@@ -423,3 +423,95 @@ public class DebugLogPacket
     public string Message { get; set; } = "";
     public long TimestampTicks { get; set; }
 }
+
+// ============================================================================
+// STATE SYNCHRONIZATION PACKETS (New architecture - no save file transfer)
+// ============================================================================
+
+/// <summary>
+/// Lightweight packet for synchronizing individual state changes.
+/// Replaces save file transfer with granular state updates.
+/// </summary>
+public class StateUpdatePacket
+{
+    /// <summary>
+    /// Type of state update (see StateUpdateType enum in StateSyncManager).
+    /// </summary>
+    public byte UpdateType { get; set; }
+
+    /// <summary>
+    /// ID of the entity being updated (party ID, hero ID, etc.)
+    /// </summary>
+    public string EntityId { get; set; } = "";
+
+    /// <summary>
+    /// Generic float values for position, speed, etc.
+    /// </summary>
+    public float FloatValue1 { get; set; }
+    public float FloatValue2 { get; set; }
+    public float FloatValue3 { get; set; }
+
+    /// <summary>
+    /// Generic int values for state enums, counts, etc.
+    /// </summary>
+    public int IntValue1 { get; set; }
+    public int IntValue2 { get; set; }
+
+    /// <summary>
+    /// Generic string value for IDs, names, etc.
+    /// </summary>
+    public string StringValue1 { get; set; } = "";
+    public string StringValue2 { get; set; } = "";
+
+    /// <summary>
+    /// Server timestamp for ordering updates.
+    /// </summary>
+    public long Timestamp { get; set; }
+}
+
+/// <summary>
+/// Request from client to join a running campaign without loading a save file.
+/// Server will send full state sync instead.
+/// </summary>
+public class StateSyncJoinRequestPacket
+{
+    public int PlayerId { get; set; }
+    public string PlayerName { get; set; } = "";
+}
+
+/// <summary>
+/// Response from server with initial world state for a joining client.
+/// Contains all data needed to initialize the client's view of the world.
+/// </summary>
+public class InitialStateSyncPacket
+{
+    /// <summary>
+    /// Campaign time in hours since start.
+    /// </summary>
+    public float CampaignTimeHours { get; set; }
+
+    /// <summary>
+    /// Current season (0-3).
+    /// </summary>
+    public int Season { get; set; }
+
+    /// <summary>
+    /// All mobile parties as JSON array.
+    /// </summary>
+    public string PartiesJson { get; set; } = "";
+
+    /// <summary>
+    /// All heroes as JSON array.
+    /// </summary>
+    public string HeroesJson { get; set; } = "";
+
+    /// <summary>
+    /// The party assigned to this player.
+    /// </summary>
+    public string AssignedPartyId { get; set; } = "";
+
+    /// <summary>
+    /// The hero assigned to this player.
+    /// </summary>
+    public string AssignedHeroId { get; set; } = "";
+}

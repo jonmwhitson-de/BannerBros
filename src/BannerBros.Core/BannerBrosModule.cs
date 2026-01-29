@@ -5,6 +5,7 @@ using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.CampaignSystem;
 using BannerBros.Core.Patches;
+using BannerBros.Core.StateSync;
 using BannerBros.Network;
 
 namespace BannerBros.Core;
@@ -117,6 +118,8 @@ public class BannerBrosModule : MBSubModuleBase
         }
     }
 
+    private float _timeEnforceLogTimer = 0;
+
     private void EnforceTimeControl()
     {
         try
@@ -124,46 +127,60 @@ public class BannerBrosModule : MBSubModuleBase
             var campaign = Campaign.Current;
             if (campaign == null) return;
 
-            // Force time to run EVERY frame - game constantly tries to pause
-            // SetTimeSpeed: 0=pause, 1=play, 2=fast forward
-            var multiplier = Config.TimeSpeedMultiplier;
+            // Reset log flag every 10 seconds to allow occasional messages
+            _timeEnforceLogTimer += 0.016f; // Approx 1 frame at 60fps
+            if (_timeEnforceLogTimer > 10f)
+            {
+                _timeEnforceLogTimer = 0;
+                Patches.TimeControlPatches.ResetLogFlag();
+            }
 
+            // If we're waiting for a client to load, DON'T force time to run
+            // This keeps worlds synced during the manual load process
+            if (Patches.TimeControlPatches.IsWaitingForClientLoad)
+            {
+                // Keep time stopped while waiting
+                return;
+            }
+
+            // CRITICAL: Force time to run EVERY frame
+            // Multiple approaches because the game tries to pause from many places
+
+            // 1. Set TimeControlMode directly to prevent pause state
+            if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
+            {
+                campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
+            }
+
+            // 2. SetTimeSpeed to ensure time flows
+            var multiplier = Config.TimeSpeedMultiplier;
             if (multiplier >= 2.0f)
             {
-                // Fast forward
                 campaign.SetTimeSpeed(2);
             }
             else
             {
-                // Normal or slow - use SetTimeSpeed(1) then adjust multiplier
                 campaign.SetTimeSpeed(1);
 
-                // Try to set the speed multiplier for fine control
                 try
                 {
                     campaign.SpeedUpMultiplier = multiplier;
                 }
-                catch
-                {
-                    // SpeedUpMultiplier might not work, that's ok
-                }
+                catch { }
             }
         }
         catch
         {
-            // SetTimeSpeed might not exist, try direct property
+            // Fallback: direct property set
             try
             {
                 var campaign = Campaign.Current;
-                if (campaign != null)
+                if (campaign != null && !Patches.TimeControlPatches.IsWaitingForClientLoad)
                 {
                     campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
                 }
             }
-            catch
-            {
-                // Ignore
-            }
+            catch { }
         }
     }
 
@@ -266,6 +283,10 @@ public class BannerBrosModule : MBSubModuleBase
             SaveFileTransferManager.Initialize();
             CommandHandler.Initialize();
 
+            // Initialize state synchronization (new architecture)
+            StateSyncManager.Instance.Initialize(isServer: true);
+            StateSyncPatches.SetSyncEnabled(true);
+
             LogMessage("HostSession: Starting host session...");
             SessionManager.StartHostSession();
 
@@ -313,6 +334,10 @@ public class BannerBrosModule : MBSubModuleBase
         // Initialize client-side managers
         SaveFileTransferManager.Initialize();
         SpectatorModeManager.Initialize();
+
+        // Initialize state synchronization (new architecture - client mode)
+        StateSyncManager.Instance.Initialize(isServer: false);
+        ClientBlockingPatches.SetClientMode(true);
 
         // Set up save file transfer callback
         SaveFileTransferManager.OnSaveFileReady += OnSaveFileReadyToLoad;
@@ -460,6 +485,11 @@ public class BannerBrosModule : MBSubModuleBase
         SaveFileTransferManager?.Cleanup();
         SpectatorModeManager?.Cleanup();
         CommandHandler?.Cleanup();
+
+        // Cleanup state sync
+        StateSyncManager.Instance.Cleanup();
+        StateSyncPatches.SetSyncEnabled(false);
+        ClientBlockingPatches.SetClientMode(false);
 
         // Clean up debug log streaming
         DebugLog.SendToServerCallback = null;

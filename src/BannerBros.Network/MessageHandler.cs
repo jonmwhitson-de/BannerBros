@@ -46,6 +46,11 @@ public class MessageHandler
     // Debug log streaming
     public event Action<DebugLogPacket, int>? OnDebugLogReceived;
 
+    // State synchronization events (new architecture - no save file transfer)
+    public event Action<StateUpdatePacket>? OnStateUpdateReceived;
+    public event Action<StateSyncJoinRequestPacket, int>? OnStateSyncJoinRequestReceived;
+    public event Action<InitialStateSyncPacket>? OnInitialStateSyncReceived;
+
     public MessageHandler(NetworkManager networkManager)
     {
         _networkManager = networkManager;
@@ -322,5 +327,31 @@ public class MessageHandler
         // Only host receives debug logs from clients
         if (!_networkManager.IsHost) return;
         OnDebugLogReceived?.Invoke(packet, peer.Id);
+    }
+
+    // ========================================================================
+    // State Synchronization Handlers (New Architecture)
+    // ========================================================================
+
+    public void HandleStateUpdate(StateUpdatePacket packet, NetPeer peer)
+    {
+        // Clients receive state updates from server
+        // Server broadcasts state updates (so also receives from itself in relay scenarios)
+        Console.WriteLine($"[BannerBros.Network] State update: Type={packet.UpdateType} Entity={packet.EntityId}");
+        OnStateUpdateReceived?.Invoke(packet);
+    }
+
+    public void HandleStateSyncJoinRequest(StateSyncJoinRequestPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] State sync join request from player {packet.PlayerId}: {packet.PlayerName}");
+        if (!_networkManager.IsHost) return;
+        OnStateSyncJoinRequestReceived?.Invoke(packet, peer.Id);
+    }
+
+    public void HandleInitialStateSync(InitialStateSyncPacket packet, NetPeer peer)
+    {
+        Console.WriteLine($"[BannerBros.Network] Initial state sync received: {packet.AssignedPartyId}");
+        if (_networkManager.IsHost) return; // Only clients receive this
+        OnInitialStateSyncReceived?.Invoke(packet);
     }
 }

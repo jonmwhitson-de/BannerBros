@@ -4,6 +4,7 @@ using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.Conversation;
 using TaleWorlds.MountAndBlade;
+using BannerBros.Core.StateSync;
 using BannerBros.Network;
 using LiteNetLib;
 
@@ -134,6 +135,12 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 module.SpectatorModeManager.UpdateCameraFollow(dt);
             }
 
+            // Apply pending state updates (client only)
+            if (!module.IsHost)
+            {
+                StateSyncManager.Instance.ApplyPendingUpdates();
+            }
+
             // Ensure all co-op player parties are visible on the map
             EnsureCoopPartiesVisible();
         }
@@ -148,6 +155,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
     /// <summary>
     /// Ensures all co-op player parties are visible on the campaign map.
+    /// Also handles position synchronization between network data and local parties.
     /// </summary>
     private void EnsureCoopPartiesVisible()
     {
@@ -157,6 +165,9 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
         var module = BannerBrosModule.Instance;
         if (module?.IsConnected != true) return;
+
+        var isHost = module.IsHost;
+        var localPlayer = module.PlayerManager.GetLocalPlayer();
 
         foreach (var player in module.PlayerManager.Players.Values.ToList())
         {
@@ -176,10 +187,41 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         catch { }
                     }
 
-                    // Update player position from party position
-                    var pos = party.GetPosition2D;
-                    player.MapPositionX = pos.x;
-                    player.MapPositionY = pos.y;
+                    // Sync direction depends on who controls this party
+                    bool isLocalParty = (localPlayer != null && player.NetworkId == localPlayer.NetworkId);
+
+                    if (isLocalParty)
+                    {
+                        // This is OUR party - read position from party to player (local -> network)
+                        var pos = party.GetPosition2D;
+                        player.MapPositionX = pos.x;
+                        player.MapPositionY = pos.y;
+                    }
+                    else
+                    {
+                        // This is ANOTHER player's party - apply network position to party
+                        // (except on host where we have direct control)
+                        if (!isHost)
+                        {
+                            var newPos = new TaleWorlds.Library.Vec2(player.MapPositionX, player.MapPositionY);
+                            try
+                            {
+                                var posProp = party.GetType().GetProperty("Position2D");
+                                if (posProp?.CanWrite == true)
+                                {
+                                    posProp.SetValue(party, newPos);
+                                }
+                            }
+                            catch { }
+                        }
+                        else
+                        {
+                            // Host: Read actual party position to player data (for broadcasting)
+                            var pos = party.GetPosition2D;
+                            player.MapPositionX = pos.x;
+                            player.MapPositionY = pos.y;
+                        }
+                    }
                 }
             }
             catch { }
@@ -327,6 +369,10 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 var pos = MobileParty.MainParty.GetPosition2D;
                 hostPlayer.MapPositionX = pos.x;
                 hostPlayer.MapPositionY = pos.y;
+
+                // Register host's party for state synchronization
+                StateSyncManager.Instance.RegisterParty(MobileParty.MainParty);
+                StateSyncManager.Instance.RegisterHero(Hero.MainHero);
             }
 
             BannerBrosModule.LogMessage($"Host linked to hero: {Hero.MainHero.Name}");

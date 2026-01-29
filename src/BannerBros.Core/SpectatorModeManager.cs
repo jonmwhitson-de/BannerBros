@@ -107,9 +107,13 @@ public class SpectatorModeManager
             if (MobileParty.MainParty != null)
             {
                 _originalMainPartyPosition = MobileParty.MainParty.GetPosition2D;
+
+                // IMPORTANT: The MainParty on the client IS the host's party (from loaded save)
+                // Register it with the host player so position sync works
+                RegisterHostParty();
             }
 
-            // Hide the main party (move it far away or make invisible)
+            // Configure the main party for spectator mode (keep visible, disable AI)
             HideMainParty();
 
             IsSpectatorMode = true;
@@ -125,6 +129,37 @@ public class SpectatorModeManager
         {
             BannerBrosModule.LogMessage($"Error entering spectator mode: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Registers the MainParty as the host's party for position sync.
+    /// Since the client loaded the host's save, MainParty IS the host's party.
+    /// </summary>
+    private void RegisterHostParty()
+    {
+        var module = BannerBrosModule.Instance;
+        if (module == null) return;
+
+        var mainParty = MobileParty.MainParty;
+        if (mainParty == null) return;
+
+        // Get the host player (player ID 0)
+        var hostPlayer = module.PlayerManager.GetPlayer(0);
+        if (hostPlayer == null)
+        {
+            BannerBrosModule.LogMessage("[Spectator] Warning: Host player not found in PlayerManager");
+            return;
+        }
+
+        // Set the host's PartyId to MainParty's StringId so position sync works
+        hostPlayer.PartyId = mainParty.StringId;
+        hostPlayer.HeroId = Hero.MainHero?.StringId;
+
+        var pos = mainParty.GetPosition2D;
+        hostPlayer.MapPositionX = pos.x;
+        hostPlayer.MapPositionY = pos.y;
+
+        BannerBrosModule.LogMessage($"[Spectator] Registered host's party: {mainParty.StringId} at ({pos.x:F1}, {pos.y:F1})");
     }
 
     /// <summary>
@@ -154,7 +189,9 @@ public class SpectatorModeManager
     }
 
     /// <summary>
-    /// Hides the main party so it doesn't interfere with spectator mode.
+    /// Prepares the main party for spectator mode.
+    /// The main party represents the HOST on the client's map, so we keep it visible
+    /// but disable AI control so it only moves based on network sync.
     /// </summary>
     private void HideMainParty()
     {
@@ -163,38 +200,30 @@ public class SpectatorModeManager
             var mainParty = MobileParty.MainParty;
             if (mainParty == null) return;
 
-            // Option 1: Move to edge of map
-            // This keeps the party in the game but out of the way
-            try
-            {
-                var posProp = mainParty.GetType().GetProperty("Position2D");
-                if (posProp?.CanWrite == true)
-                {
-                    // Move to corner of map
-                    posProp.SetValue(mainParty, new Vec2(0, 0));
-                }
-            }
-            catch { }
+            // IMPORTANT: Do NOT hide the MainParty!
+            // On the client, MainParty is the HOST's party (from the loaded save).
+            // We need it visible so the client can see the host moving on the map.
 
-            // Option 2: Make invisible (if API supports it)
-            try
-            {
-                mainParty.IsVisible = false;
-            }
-            catch { }
-
-            // Option 3: Disable AI
+            // Only disable AI so it doesn't make autonomous decisions
+            // Position will be controlled by network sync
             try
             {
                 mainParty.Ai?.SetDoNotMakeNewDecisions(true);
             }
             catch { }
 
-            BannerBrosModule.LogMessage("Main party hidden for spectator mode");
+            // Make sure it stays visible
+            try
+            {
+                mainParty.IsVisible = true;
+            }
+            catch { }
+
+            BannerBrosModule.LogMessage($"[Spectator] MainParty kept visible as host party: {mainParty.StringId}");
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"Error hiding main party: {ex.Message}");
+            BannerBrosModule.LogMessage($"Error configuring main party: {ex.Message}");
         }
     }
 

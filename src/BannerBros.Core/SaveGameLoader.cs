@@ -22,7 +22,18 @@ public static class SaveGameLoader
         // Force refresh the save list to include newly written file
         ForceRefreshSaveList();
 
-        // FIRST try to get save from game's internal list (has proper file references)
+        // STRATEGY: In Attempt 6, a FRESH SaveGameFileInfo (not from the game's cached list)
+        // actually triggered the load dialog! The game's cached list seems to have state
+        // that prevents re-loading. So we try FRESH first, then cached.
+
+        // FIRST: Try with a freshly created SaveGameFileInfo with just Name set
+        BannerBrosModule.LogMessage("[SaveLoader] Trying FRESH SaveGameFileInfo approach...");
+        if (TryLoadWithFreshSaveFileInfo(saveName))
+        {
+            return true;
+        }
+
+        // SECOND: Try to get save from game's internal list (has proper file references)
         var saveFileInfo = GetSaveFileInfo(saveName);
 
         if (saveFileInfo != null)
@@ -63,6 +74,159 @@ public static class SaveGameLoader
         BannerBrosModule.LogMessage("[SaveLoader] Could not load save by any method!");
         BannerBrosModule.LogMessage("[SaveLoader] Try loading manually from Load Game menu");
         return false;
+    }
+
+    /// <summary>
+    /// Creates a FRESH SaveGameFileInfo with Name and MetaData copied from the cached one,
+    /// then calls TryLoadSave. This approach triggered the load dialog in Attempt 6.
+    /// The key is using a FRESH object (not the cached one) but WITH proper metadata.
+    /// </summary>
+    private static bool TryLoadWithFreshSaveFileInfo(string saveName)
+    {
+        try
+        {
+            // Find SaveGameFileInfo type
+            Type? saveFileInfoType = null;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    var type = assembly.GetType("TaleWorlds.SaveSystem.SaveGameFileInfo");
+                    if (type != null)
+                    {
+                        saveFileInfoType = type;
+                        break;
+                    }
+                }
+                catch { }
+            }
+
+            if (saveFileInfoType == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] SaveGameFileInfo type not found");
+                return false;
+            }
+
+            // Get the cached save info to copy MetaData from
+            var cachedSaveInfo = GetSaveFileInfo(saveName);
+            object? metaData = null;
+            if (cachedSaveInfo != null)
+            {
+                var metaDataField = saveFileInfoType.GetField("MetaData",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (metaDataField != null)
+                {
+                    metaData = metaDataField.GetValue(cachedSaveInfo);
+                    BannerBrosModule.LogMessage($"[SaveLoader] Got MetaData from cached save: {metaData?.GetType().Name ?? "null"}");
+                }
+            }
+
+            // Create fresh instance with parameterless constructor
+            var ctor = saveFileInfoType.GetConstructor(Type.EmptyTypes);
+            if (ctor == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] No parameterless constructor found");
+                return false;
+            }
+
+            var freshSaveInfo = ctor.Invoke(null);
+            BannerBrosModule.LogMessage("[SaveLoader] Created FRESH SaveGameFileInfo");
+
+            // Set the Name field via reflection
+            var nameField = saveFileInfoType.GetField("Name",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (nameField != null)
+            {
+                nameField.SetValue(freshSaveInfo, saveName);
+                BannerBrosModule.LogMessage($"[SaveLoader] Set Name field = {saveName}");
+            }
+            else
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] Name field not found");
+            }
+
+            // Set the MetaData field (CRITICAL - Attempt 6 crashed without this)
+            if (metaData != null)
+            {
+                var metaDataField = saveFileInfoType.GetField("MetaData",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (metaDataField != null)
+                {
+                    metaDataField.SetValue(freshSaveInfo, metaData);
+                    BannerBrosModule.LogMessage("[SaveLoader] Set MetaData field from cached save");
+                }
+            }
+
+            // Set IsCorrupted = false
+            var isCorruptedField = saveFileInfoType.GetField("IsCorrupted",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (isCorruptedField != null)
+            {
+                isCorruptedField.SetValue(freshSaveInfo, false);
+                BannerBrosModule.LogMessage("[SaveLoader] Set IsCorrupted = false");
+            }
+
+            // Now call TryLoadSave with this fresh SaveGameFileInfo
+            var sandboxAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "SandBox");
+
+            if (sandboxAssembly == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] SandBox assembly not found");
+                return false;
+            }
+
+            var helperType = sandboxAssembly.GetType("SandBox.SandBoxSaveHelper");
+            if (helperType == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] SandBoxSaveHelper not found");
+                return false;
+            }
+
+            var tryLoadMethod = helperType.GetMethod("TryLoadSave",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+            if (tryLoadMethod == null)
+            {
+                BannerBrosModule.LogMessage("[SaveLoader] TryLoadSave method not found");
+                return false;
+            }
+
+            var parameters = tryLoadMethod.GetParameters();
+            BannerBrosModule.LogMessage($"[SaveLoader] TryLoadSave has {parameters.Length} params");
+
+            // Call with NULL callbacks - this triggered the dialog in Attempt 6!
+            BannerBrosModule.LogMessage("[SaveLoader] Calling TryLoadSave with FRESH SaveGameFileInfo (with MetaData) and NULL callbacks...");
+
+            object?[] args;
+            if (parameters.Length == 3)
+            {
+                args = new object?[] { freshSaveInfo, null, null };
+            }
+            else if (parameters.Length == 2)
+            {
+                args = new object?[] { freshSaveInfo, null };
+            }
+            else
+            {
+                args = new object?[] { freshSaveInfo };
+            }
+
+            var result = tryLoadMethod.Invoke(null, args);
+            BannerBrosModule.LogMessage($"[SaveLoader] TryLoadSave with FRESH returned: {result}");
+
+            // If we get here without exception, it might have worked
+            return true;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveLoader] Fresh SaveGameFileInfo approach failed: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                BannerBrosModule.LogMessage($"[SaveLoader] Inner: {ex.InnerException.Message}");
+            }
+            return false;
+        }
     }
 
     /// <summary>

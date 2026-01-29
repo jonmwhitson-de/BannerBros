@@ -292,12 +292,65 @@ Documents/Mount and Blade II Bannerlord/
 
 ## Next Steps to Try
 
-1. **Test with correct save location** - Save to `Game Saves\` and see if it appears in list
+1. ~~**Test with correct save location** - Save to `Game Saves\` and see if it appears in list~~ ✅ Done
 2. **Try calling TryLoadSave with empty SaveGameFileInfo** - Maybe it reads file internally
 3. **Investigate how SaveGameFileInfo gets populated** - May need to read save file header
 4. **Look for ISaveDriver or similar** - Lower-level save system access
 5. **Check if there's a "scan directory" method** - Force rescan of save folder
 6. **Try MBSaveLoad.LoadSaveGameData directly with path** - Bypass SaveGameFileInfo entirely
+
+---
+
+## Party Visibility Issue (Post-Load)
+
+After manually loading the save file, a new issue was discovered: **players cannot see each other on the map**.
+
+### Root Cause Analysis (2026-01-28)
+
+**Problem**: When client loads the host's save and enters spectator mode, they hide `MobileParty.MainParty`. But on the client's game world, `MainParty` IS the host's party (since they loaded the same save).
+
+**Flow**:
+1. Client loads host's save file
+2. Client's `MobileParty.MainParty` = Host's party (from the save)
+3. Client calls `SpectatorModeManager.EnterSpectatorMode()`
+4. `HideMainParty()` sets `MainParty.IsVisible = false` ← **BUG: Hides the host!**
+5. Host sends position updates for their party
+6. Client receives and updates position of the invisible party
+7. Client sees nothing
+
+**Fix Applied**:
+1. **SpectatorModeManager.HideMainParty()**: Changed to NOT hide MainParty. Instead, keep it visible (it represents the host) and only disable AI.
+
+2. **SpectatorModeManager.RegisterHostParty()**: Added method to explicitly register MainParty as the host's party in PlayerManager, ensuring position sync works correctly.
+
+3. **BannerBrosCampaignBehavior.EnsureCoopPartiesVisible()**: Fixed sync direction:
+   - For LOCAL player's party: Read position FROM party TO network data
+   - For OTHER players' parties (on client): Apply network data TO party position
+   - For OTHER players' parties (on host): Read actual position TO network data
+
+**Files Modified**:
+- `src/BannerBros.Core/SpectatorModeManager.cs`
+- `src/BannerBros.Core/Behaviors/BannerBrosCampaignBehavior.cs`
+
+---
+
+### Attempt 14: Fresh SaveGameFileInfo with MetaData
+**Date:** 2026-01-29
+**Commit:** (pending)
+**Result:** 🔄 Pending
+**Details:**
+- Observation: Attempt 6 (empty SaveGameFileInfo) triggered load dialog, Attempt 8 (cached SaveGameFileInfo) did nothing
+- Hypothesis: Cached SaveGameFileInfo has some state that prevents re-loading
+- Approach: Create FRESH SaveGameFileInfo, copy Name and MetaData from cached one
+- This combines the "triggers dialog" behavior of fresh object with proper metadata to prevent crash
+
+**Changes:**
+- Added `TryLoadWithFreshSaveFileInfo()` method
+- Creates new SaveGameFileInfo via parameterless constructor
+- Sets Name field to save name
+- Copies MetaData from cached SaveGameFileInfo
+- Sets IsCorrupted = false
+- Calls TryLoadSave with NULL callbacks (which triggered dialog in Attempt 6)
 
 ---
 
