@@ -31,6 +31,9 @@ public class StateSyncManager
     private readonly HashSet<string> _syncedPartyIds = new();
     private readonly HashSet<string> _syncedHeroIds = new();
 
+    // Track shadow parties created on client for other players
+    private readonly Dictionary<string, MobileParty> _shadowParties = new();
+
     // Pending state updates to apply (client-side)
     private readonly Queue<StateUpdatePacket> _pendingUpdates = new();
 
@@ -77,6 +80,18 @@ public class StateSyncManager
         _syncedPartyIds.Clear();
         _syncedHeroIds.Clear();
         _pendingUpdates.Clear();
+
+        // Destroy shadow parties
+        foreach (var party in _shadowParties.Values)
+        {
+            try
+            {
+                party?.RemoveParty();
+            }
+            catch { }
+        }
+        _shadowParties.Clear();
+
         _initialized = false;
 
         BannerBrosModule.LogMessage("[StateSync] Cleaned up");
@@ -264,11 +279,21 @@ public class StateSyncManager
         var party = Campaign.Current?.MobileParties
             .FirstOrDefault(p => p.StringId == partyId);
 
+        // Check shadow parties if not found
         if (party == null)
         {
-            // Party doesn't exist locally - might need to create it
-            BannerBrosModule.LogMessage($"[StateSync] Party {partyId} not found locally");
-            return;
+            _shadowParties.TryGetValue(partyId, out party);
+        }
+
+        if (party == null)
+        {
+            // Party doesn't exist locally - create a shadow party
+            party = CreateShadowParty(partyId, x, y);
+            if (party == null)
+            {
+                BannerBrosModule.LogMessage($"[StateSync] Failed to create shadow party for {partyId}");
+                return;
+            }
         }
 
         var newPos = new Vec2(x, y);
@@ -292,6 +317,58 @@ public class StateSyncManager
         catch { }
 
         OnPartyPositionChanged?.Invoke(partyId, newPos);
+    }
+
+    /// <summary>
+    /// Creates a shadow party on the client to represent a remote player.
+    /// </summary>
+    private MobileParty? CreateShadowParty(string partyId, float x, float y)
+    {
+        try
+        {
+            if (Campaign.Current == null) return null;
+
+            BannerBrosModule.LogMessage($"[StateSync] Creating shadow party: {partyId} at ({x}, {y})");
+
+            // Create a minimal party to represent the remote player
+            var party = MobileParty.CreateParty(partyId, null, null);
+
+            if (party == null)
+            {
+                BannerBrosModule.LogMessage($"[StateSync] MobileParty.CreateParty returned null");
+                return null;
+            }
+
+            // Set position
+            var pos = new Vec2(x, y);
+            try
+            {
+                var posProp = party.GetType().GetProperty("Position2D");
+                if (posProp?.CanWrite == true)
+                {
+                    posProp.SetValue(party, pos);
+                }
+            }
+            catch { }
+
+            // Make visible on map
+            try { party.IsVisible = true; } catch { }
+
+            // Disable AI
+            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+
+            // Track the shadow party
+            _shadowParties[partyId] = party;
+            _syncedPartyIds.Add(partyId);
+
+            BannerBrosModule.LogMessage($"[StateSync] Shadow party created: {partyId}");
+            return party;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] Error creating shadow party: {ex.Message}");
+            return null;
+        }
     }
 
     private void ApplyPartyState(string partyId, int state)

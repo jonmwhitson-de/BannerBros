@@ -12,7 +12,8 @@ namespace BannerBros.Core;
 
 /// <summary>
 /// Main entry point for the BannerBros co-op mod.
-/// Manages core functionality and coordinates between network and client modules.
+/// Uses state synchronization - no save file transfer.
+/// Each player runs their own campaign, state is synced via network.
 /// </summary>
 public class BannerBrosModule : MBSubModuleBase
 {
@@ -28,8 +29,7 @@ public class BannerBrosModule : MBSubModuleBase
     public SessionManager SessionManager { get; private set; } = null!;
     public PlayerSaveData PlayerSaveData { get; set; } = new();
 
-    // Single Authoritative Campaign managers
-    public SaveFileTransferManager SaveFileTransferManager { get; private set; } = null!;
+    // Managers
     public SpectatorModeManager SpectatorModeManager { get; private set; } = null!;
     public CommandHandler CommandHandler { get; private set; } = null!;
 
@@ -37,11 +37,6 @@ public class BannerBrosModule : MBSubModuleBase
     /// Character data captured from character creation, pending to be sent to server.
     /// </summary>
     public ExportedCharacter? PendingExportedCharacter { get; set; }
-
-    /// <summary>
-    /// Path to save file received from host, waiting to be loaded.
-    /// </summary>
-    public string? PendingSaveFilePath { get; set; }
 
     public bool IsHost { get; private set; }
     public bool IsConnected { get; private set; }
@@ -57,14 +52,12 @@ public class BannerBrosModule : MBSubModuleBase
         WorldStateManager = new WorldStateManager();
         SessionManager = new SessionManager(PlayerManager, WorldStateManager);
 
-        // Initialize single authoritative campaign managers
-        SaveFileTransferManager = new SaveFileTransferManager(SessionManager);
         SpectatorModeManager = new SpectatorModeManager();
         CommandHandler = new CommandHandler(PlayerManager);
 
         InitializeHarmony();
 
-        LogMessage("BannerBros v0.1.0 loaded");
+        LogMessage("BannerBros v0.2.0 loaded (State Sync)");
     }
 
     private void InitializeHarmony()
@@ -84,15 +77,9 @@ public class BannerBrosModule : MBSubModuleBase
     protected override void OnSubModuleUnloaded()
     {
         base.OnSubModuleUnloaded();
-
-        // SessionManager?.Cleanup(); // Disabled
-        // _harmony?.UnpatchAll(HarmonyId); // Disabled
         Config?.Save();
         Instance = null;
     }
-
-    private float _timeCheckTimer;
-    private bool _hasLoggedTimeMode;
 
     protected override void OnApplicationTick(float dt)
     {
@@ -105,7 +92,6 @@ public class BannerBrosModule : MBSubModuleBase
         }
 
         // Check for pending co-op connections when on main menu
-        // This handles the case where player returns to menu after character creation
         if (!IsConnected && Campaign.Current == null)
         {
             Patches.CoopConnectionManager.CheckAndProcessPendingConnection();
@@ -127,32 +113,19 @@ public class BannerBrosModule : MBSubModuleBase
             var campaign = Campaign.Current;
             if (campaign == null) return;
 
-            // Reset log flag every 10 seconds to allow occasional messages
-            _timeEnforceLogTimer += 0.016f; // Approx 1 frame at 60fps
+            _timeEnforceLogTimer += 0.016f;
             if (_timeEnforceLogTimer > 10f)
             {
                 _timeEnforceLogTimer = 0;
                 Patches.TimeControlPatches.ResetLogFlag();
             }
 
-            // If we're waiting for a client to load, DON'T force time to run
-            // This keeps worlds synced during the manual load process
-            if (Patches.TimeControlPatches.IsWaitingForClientLoad)
-            {
-                // Keep time stopped while waiting
-                return;
-            }
-
-            // CRITICAL: Force time to run EVERY frame
-            // Multiple approaches because the game tries to pause from many places
-
-            // 1. Set TimeControlMode directly to prevent pause state
+            // Force time to run
             if (campaign.TimeControlMode == CampaignTimeControlMode.Stop)
             {
                 campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
             }
 
-            // 2. SetTimeSpeed to ensure time flows
             var multiplier = Config.TimeSpeedMultiplier;
             if (multiplier >= 2.0f)
             {
@@ -161,32 +134,12 @@ public class BannerBrosModule : MBSubModuleBase
             else
             {
                 campaign.SetTimeSpeed(1);
-
-                try
-                {
-                    campaign.SpeedUpMultiplier = multiplier;
-                }
-                catch { }
+                try { campaign.SpeedUpMultiplier = multiplier; } catch { }
             }
         }
-        catch
-        {
-            // Fallback: direct property set
-            try
-            {
-                var campaign = Campaign.Current;
-                if (campaign != null && !Patches.TimeControlPatches.IsWaitingForClientLoad)
-                {
-                    campaign.TimeControlMode = CampaignTimeControlMode.StoppablePlay;
-                }
-            }
-            catch { }
-        }
+        catch { }
     }
 
-    /// <summary>
-    /// Cycles time speed between normal and fast (host only).
-    /// </summary>
     public void CycleTimeSpeed()
     {
         if (!IsHost) return;
@@ -206,17 +159,10 @@ public class BannerBrosModule : MBSubModuleBase
     protected override void OnBeforeInitialModuleScreenSetAsRoot()
     {
         base.OnBeforeInitialModuleScreenSetAsRoot();
-        // Notify other modules that core is ready
         OnCoreModuleReady?.Invoke();
-
-        // Check for pending co-op connections (after character creation)
         Patches.CoopConnectionManager.CheckAndProcessPendingConnection();
     }
 
-    /// <summary>
-    /// Event fired when core module is fully initialized.
-    /// Other modules can subscribe to this to know when to wire up dependencies.
-    /// </summary>
     public static event Action? OnCoreModuleReady;
 
     protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
@@ -234,7 +180,6 @@ public class BannerBrosModule : MBSubModuleBase
     {
         base.OnGameEnd(game);
 
-        // Cleanup network connections when game ends
         if (IsConnected)
         {
             Disconnect();
@@ -247,43 +192,33 @@ public class BannerBrosModule : MBSubModuleBase
         starter.AddBehavior(new TimeControlBehavior());
         starter.AddBehavior(new BattleJoinBehavior());
         starter.AddBehavior(new PlayerProtectionBehavior());
-        LogMessage("All campaign behaviors loaded");
+        LogMessage("Campaign behaviors loaded");
     }
 
     public void HostSession(int port = 7777)
     {
         try
         {
-            // Initialize debug logging for server
             DebugLog.Initialize(isHost: true);
 
             LogMessage("HostSession: Setting IsHost = true");
             IsHost = true;
 
-            // Clear any existing players from previous sessions
             PlayerManager.Clear();
 
             LogMessage("HostSession: Starting network host...");
-            if (NetworkManager.Instance == null)
-            {
-                LogMessage("Warning: NetworkManager.Instance is null!");
-            }
             NetworkManager.Instance?.StartHost(port, Config.MaxPlayers);
 
-            // Subscribe to debug log streaming from clients
             if (NetworkManager.Instance?.Messages != null)
             {
                 NetworkManager.Instance.Messages.OnDebugLogReceived += OnDebugLogReceived;
             }
 
-            LogMessage("HostSession: Initializing SessionManager...");
+            LogMessage("HostSession: Initializing managers...");
             SessionManager.Initialize();
-
-            // Initialize host-side managers
-            SaveFileTransferManager.Initialize();
             CommandHandler.Initialize();
 
-            // Initialize state synchronization (new architecture)
+            // Initialize state synchronization
             StateSyncManager.Instance.Initialize(isServer: true);
             StateSyncPatches.SetSyncEnabled(true);
 
@@ -300,22 +235,21 @@ public class BannerBrosModule : MBSubModuleBase
         }
     }
 
-    /// <summary>
-    /// Called on server when receiving debug logs from a client.
-    /// </summary>
     private void OnDebugLogReceived(DebugLogPacket packet, int peerId)
     {
         var timestamp = new DateTime(packet.TimestampTicks);
         DebugLog.LogRemoteClient(packet.Message, packet.PlayerId, packet.PlayerName, timestamp);
     }
 
+    /// <summary>
+    /// Join a co-op session. Client should already be in their own campaign.
+    /// State will be synchronized via network packets.
+    /// </summary>
     public void JoinSession(string address, int port = 7777)
     {
-        // Initialize debug logging for client with streaming if enabled
         var streamLogs = Config.StreamClientLogs;
         DebugLog.Initialize(isHost: false, streamToServer: streamLogs, playerId: 0, playerName: Config.PlayerName);
 
-        // Set up the callback to send logs to server
         if (streamLogs)
         {
             DebugLog.SendToServerCallback = SendDebugLogToServer;
@@ -328,20 +262,13 @@ public class BannerBrosModule : MBSubModuleBase
         }
 
         IsHost = false;
-        LogMessage("JoinSession: Initializing SessionManager...");
+        LogMessage("JoinSession: Initializing managers...");
         SessionManager.Initialize();
-
-        // Initialize client-side managers
-        SaveFileTransferManager.Initialize();
         SpectatorModeManager.Initialize();
 
-        // Initialize state synchronization (new architecture - client mode)
+        // Initialize state synchronization (client mode)
         StateSyncManager.Instance.Initialize(isServer: false);
         ClientBlockingPatches.SetClientMode(true);
-
-        // Set up save file transfer callback
-        SaveFileTransferManager.OnSaveFileReady += OnSaveFileReadyToLoad;
-        SaveFileTransferManager.OnTransferProgress += OnSaveTransferProgress;
 
         LogMessage("JoinSession: Connecting to server...");
         NetworkManager.Instance.Connect(address, port);
@@ -349,9 +276,6 @@ public class BannerBrosModule : MBSubModuleBase
         LogMessage($"Joining session at {address}:{port}");
     }
 
-    /// <summary>
-    /// Sends a debug log message to the server (client only).
-    /// </summary>
     private void SendDebugLogToServer(string message, int playerId, string playerName)
     {
         if (IsHost || NetworkManager.Instance == null) return;
@@ -364,134 +288,18 @@ public class BannerBrosModule : MBSubModuleBase
             TimestampTicks = DateTime.Now.Ticks
         };
 
-        NetworkManager.Instance.SendToServer(packet, LiteNetLib.DeliveryMethod.ReliableUnordered);
-    }
-
-    /// <summary>
-    /// Called when save file has been received and is ready to load.
-    /// </summary>
-    private void OnSaveFileReadyToLoad(string savePath)
-    {
-        LogMessage($"Save file ready at: {savePath}");
-        PendingSaveFilePath = savePath;
-
-        var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
-
-        // Show loading message
-        LogMessage("*** SAVE TRANSFER COMPLETE ***");
-        LogMessage($"*** Loading {saveName}... ***");
-
-        // Attempt auto-load after a small delay for file system to settle
-        System.Threading.Tasks.Task.Run(async () =>
-        {
-            await System.Threading.Tasks.Task.Delay(1000); // Give file system time
-
-            // Must run on main thread
-            try
-            {
-                var utilitiesType = typeof(TaleWorlds.Engine.Utilities);
-                var enqueueMethod = utilitiesType.GetMethod("EnqueueAction",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-
-                if (enqueueMethod != null)
-                {
-                    enqueueMethod.Invoke(null, new object[] { (Action)(() => TryAutoLoadSave(savePath)) });
-                }
-                else
-                {
-                    TryAutoLoadSave(savePath);
-                }
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"Error queuing auto-load: {ex.Message}");
-                ShowManualLoadInstructions(savePath);
-            }
-        });
-    }
-
-    /// <summary>
-    /// Attempts to auto-load the save file.
-    /// </summary>
-    private void TryAutoLoadSave(string savePath)
-    {
-        var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
-
-        try
-        {
-            LogMessage($"[AutoLoad] Attempting to load: {saveName}");
-
-            if (SaveGameLoader.LoadSaveFile(savePath))
-            {
-                LogMessage("[AutoLoad] Save loading initiated!");
-                // The game will now transition to campaign
-            }
-            else
-            {
-                LogMessage("[AutoLoad] Auto-load failed");
-                ShowManualLoadInstructions(savePath);
-            }
-        }
-        catch (Exception ex)
-        {
-            LogMessage($"[AutoLoad] Error: {ex.Message}");
-            ShowManualLoadInstructions(savePath);
-        }
-    }
-
-    /// <summary>
-    /// Shows instructions for manual save loading when auto-load fails.
-    /// </summary>
-    private void ShowManualLoadInstructions(string savePath)
-    {
-        var saveName = System.IO.Path.GetFileNameWithoutExtension(savePath);
-
-        // Show a prominent dialog - user MUST use Load Game, NOT Continue Campaign
-        InformationManager.ShowInquiry(
-            new InquiryData(
-                "Load Co-op Save",
-                $"The host's save file is ready!\n\n" +
-                $"IMPORTANT: Do NOT use 'Continue Campaign'\n\n" +
-                $"Instead:\n" +
-                $"1. Click 'Load Game' on the main menu\n" +
-                $"2. Find and load: {saveName}\n" +
-                $"3. You'll join the host's world automatically\n\n" +
-                $"The save file starts with 'CoOp_'",
-                true,
-                false,
-                "Got it!",
-                "",
-                null,
-                null
-            ),
-            true
-        );
-    }
-
-    /// <summary>
-    /// Called during save file transfer to show progress.
-    /// </summary>
-    private void OnSaveTransferProgress(float progress)
-    {
-        if ((int)(progress * 100) % 20 == 0) // Log every 20%
-        {
-            LogMessage($"Save file transfer: {progress * 100:F0}%");
-        }
+        NetworkManager.Instance.SendToServer(packet, DeliveryMethod.ReliableUnordered);
     }
 
     public void Disconnect()
     {
-        // Cleanup managers
-        SaveFileTransferManager?.Cleanup();
         SpectatorModeManager?.Cleanup();
         CommandHandler?.Cleanup();
 
-        // Cleanup state sync
         StateSyncManager.Instance.Cleanup();
         StateSyncPatches.SetSyncEnabled(false);
         ClientBlockingPatches.SetClientMode(false);
 
-        // Clean up debug log streaming
         DebugLog.SendToServerCallback = null;
         if (NetworkManager.Instance?.Messages != null)
         {
@@ -501,7 +309,6 @@ public class BannerBrosModule : MBSubModuleBase
         NetworkManager.Instance?.Disconnect();
         SessionManager.Cleanup();
         PlayerManager.Clear();
-        PendingSaveFilePath = null;
         IsConnected = false;
         IsHost = false;
         LogMessage("Disconnected from session");
@@ -509,10 +316,7 @@ public class BannerBrosModule : MBSubModuleBase
 
     public static void LogMessage(string message)
     {
-        // Display in game
         InformationManager.DisplayMessage(new InformationMessage($"[BannerBros] {message}"));
-
-        // Also log to file for debugging
         DebugLog.Log(message);
     }
 }

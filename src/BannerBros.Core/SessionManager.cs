@@ -2218,7 +2218,6 @@ public class SessionManager
                 if (savedChar != null && !string.IsNullOrEmpty(savedChar.HeroId))
                 {
                     BannerBrosModule.LogMessage($"Found saved character: {savedChar.HeroName}");
-                    // Notify UI - but don't return, we still need the save file!
                     OnSavedCharacterFound?.Invoke(savedChar);
                 }
             }
@@ -2228,12 +2227,61 @@ public class SessionManager
             }
         }
 
-        // For Single Authoritative Campaign: ALWAYS request save file from host
-        // Client needs to load this save to have the same world state as host
-        // This is required whether they have a saved character or not
-        BannerBrosModule.LogMessage("Requesting save file from host...");
-        SetState(SessionState.WaitingForSaveFile);
-        BannerBrosModule.Instance?.SaveFileTransferManager.RequestSaveFile(packet.AssignedPlayerId);
+        // State Sync Architecture: No save file transfer needed
+        // Client runs their own campaign, state is synchronized via network packets
+        BannerBrosModule.LogMessage("Player joined the game");
+        SetState(SessionState.Connected);
+
+        // If client is already in a campaign, notify the server
+        if (Campaign.Current != null)
+        {
+            BannerBrosModule.LogMessage("Already in campaign - sending ready notification");
+            NotifyServerCampaignReady();
+        }
+        else
+        {
+            BannerBrosModule.LogMessage("Please start or load a campaign to begin co-op play");
+        }
+    }
+
+    /// <summary>
+    /// Notifies the server that the client's campaign is ready for state sync.
+    /// </summary>
+    private void NotifyServerCampaignReady()
+    {
+        try
+        {
+            var localPlayer = _playerManager.GetLocalPlayer();
+            if (localPlayer == null) return;
+
+            var hero = Hero.MainHero;
+            var party = MobileParty.MainParty;
+            if (hero == null || party == null) return;
+
+            var pos = party.GetPosition2D;
+
+            var packet = new ClientCampaignReadyPacket
+            {
+                PlayerId = localPlayer.NetworkId,
+                HeroName = hero.Name?.ToString() ?? localPlayer.Name,
+                HeroId = hero.StringId,
+                ClanId = hero.Clan?.StringId ?? "",
+                CultureId = hero.Culture?.StringId ?? "",
+                MapX = pos.x,
+                MapY = pos.y,
+                IsFemale = hero.IsFemale,
+                Age = (int)hero.Age
+            };
+
+            try { packet.BodyPropertiesXml = hero.BodyProperties.ToString(); } catch { }
+
+            NetworkManager.Instance?.SendToServer(packet);
+            BannerBrosModule.LogMessage($"Sent campaign ready: {packet.HeroName}");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Error sending campaign ready: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -2524,8 +2572,7 @@ public enum SessionState
 {
     Disconnected,
     Joining,
-    WaitingForSaveFile,
+    Connected,
     CharacterCreation,
-    SpectatorMode,
     InSession
 }

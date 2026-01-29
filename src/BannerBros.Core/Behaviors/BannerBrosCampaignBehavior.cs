@@ -87,24 +87,16 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         _campaignReady = true;
                         BannerBrosModule.LogMessage("Campaign ready - starting co-op sync");
 
-                        // Link host player to main hero now that campaign is ready
+                        // Link player to main hero now that campaign is ready
                         if (module.IsHost)
                         {
                             LinkHostToMainHero();
                         }
                         else
                         {
-                            // Client: Check if this is a co-op save (spectator mode)
-                            if (ShouldEnterSpectatorMode())
-                            {
-                                BannerBrosModule.LogMessage("Detected co-op save - entering spectator mode");
-                                BannerBrosModule.Instance?.SpectatorModeManager.EnterSpectatorMode();
-                            }
-                            else
-                            {
-                                // Normal client join - notify host that our campaign has loaded
-                                SendCampaignReadyToHost();
-                            }
+                            // Client: Notify host that our campaign has loaded
+                            // State sync will handle showing other players on the map
+                            SendCampaignReadyToHost();
                         }
                     }
                 }
@@ -127,12 +119,6 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             {
                 _worldSyncTimer = 0;
                 SyncWorldState();
-            }
-
-            // Client in spectator mode: update camera to follow assigned party
-            if (!module.IsHost && module.SpectatorModeManager?.IsSpectatorMode == true)
-            {
-                module.SpectatorModeManager.UpdateCameraFollow(dt);
             }
 
             // Apply pending state updates (client only)
@@ -226,35 +212,6 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             }
             catch { }
         }
-    }
-
-    /// <summary>
-    /// Checks if the client should enter spectator mode (loaded a co-op save).
-    /// </summary>
-    private bool ShouldEnterSpectatorMode()
-    {
-        var module = BannerBrosModule.Instance;
-        if (module == null) return false;
-
-        // Check if we're connected as a client
-        if (!module.IsConnected || module.IsHost) return false;
-
-        // Check if we have a pending co-op save file path
-        if (!string.IsNullOrEmpty(module.PendingSaveFilePath))
-        {
-            BannerBrosModule.LogMessage($"[Spectator] PendingSaveFilePath set: {module.PendingSaveFilePath}");
-            return true;
-        }
-
-        // Check if the session state indicates we should be in spectator mode
-        if (module.SessionState == SessionState.WaitingForSaveFile ||
-            module.SessionState == SessionState.SpectatorMode)
-        {
-            BannerBrosModule.LogMessage($"[Spectator] SessionState indicates spectator: {module.SessionState}");
-            return true;
-        }
-
-        return false;
     }
 
     /// <summary>
