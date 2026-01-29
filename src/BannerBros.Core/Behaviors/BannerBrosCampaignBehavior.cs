@@ -25,6 +25,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
     private PlayerState _lastState;
     private bool _campaignReady;
     private float _readyCheckTimer;
+    private bool _joinPopupShown;
 
     public override void RegisterEvents()
     {
@@ -59,6 +60,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         _worldSyncTimer = 0;
         _campaignReady = false;
         _readyCheckTimer = 0;
+        _joinPopupShown = false;
 
         // Load saved player data for this campaign
         var module = BannerBrosModule.Instance;
@@ -73,9 +75,9 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         try
         {
             var module = BannerBrosModule.Instance;
-            if (module?.IsConnected != true) return;
+            if (module == null) return;
 
-            // Wait for campaign to be fully ready before syncing
+            // Check if campaign is ready (needed for both connected and not connected states)
             if (!_campaignReady)
             {
                 _readyCheckTimer += dt;
@@ -85,23 +87,37 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                     if (IsCampaignReady())
                     {
                         _campaignReady = true;
-                        BannerBrosModule.LogMessage("Campaign ready - starting co-op sync");
+                        BannerBrosModule.LogMessage("Campaign ready");
 
-                        // Link player to main hero now that campaign is ready
-                        if (module.IsHost)
+                        if (module.IsConnected)
                         {
-                            LinkHostToMainHero();
+                            // Already connected - initialize co-op sync
+                            BannerBrosModule.LogMessage("Starting co-op sync");
+                            if (module.IsHost)
+                            {
+                                LinkHostToMainHero();
+                            }
+                            else
+                            {
+                                SendCampaignReadyToHost();
+                            }
                         }
-                        else
+                        else if (!_joinPopupShown)
                         {
-                            // Client: Notify host that our campaign has loaded
-                            // State sync will handle showing other players on the map
-                            SendCampaignReadyToHost();
+                            // Not connected - show join popup
+                            _joinPopupShown = true;
+                            ShowJoinCoopPopup();
                         }
                     }
                 }
+
+                // If not connected, don't do sync operations
+                if (!module.IsConnected) return;
                 return;
             }
+
+            // Not connected - nothing else to do
+            if (!module.IsConnected) return;
 
             // Accumulate time
             _syncTimer += dt;
@@ -134,6 +150,102 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         {
             BannerBrosModule.LogMessage($"OnTick error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Shows a popup asking the player if they want to join a co-op server.
+    /// </summary>
+    private void ShowJoinCoopPopup()
+    {
+        try
+        {
+            TaleWorlds.Core.InformationManager.ShowInquiry(
+                new TaleWorlds.Core.InquiryData(
+                    "Co-op Multiplayer",
+                    "Would you like to join a co-op server?\n\n" +
+                    "You can play with friends by connecting to a host's game. " +
+                    "Both players will see each other on the campaign map!",
+                    true,
+                    true,
+                    "Join Server",
+                    "Play Solo",
+                    OnJoinCoopAccepted,
+                    null
+                ),
+                true
+            );
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Error showing join popup: {ex.Message}");
+        }
+    }
+
+    private void OnJoinCoopAccepted()
+    {
+        // Show the IP entry dialog
+        try
+        {
+            var lastAddress = BannerBrosModule.Instance?.Config.LastServerAddress ?? "";
+            TaleWorlds.Core.InformationManager.ShowTextInquiry(
+                new TaleWorlds.Core.TextInquiryData(
+                    "Join Co-op Server",
+                    "Enter the host's IP address:\n\nExample: 192.168.1.100 or 192.168.1.100:7777",
+                    true,
+                    true,
+                    "Connect",
+                    "Cancel",
+                    OnServerAddressEntered,
+                    null,
+                    false,
+                    text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
+                    "",
+                    lastAddress
+                )
+            );
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"Error showing IP dialog: {ex.Message}");
+        }
+    }
+
+    private void OnServerAddressEntered(string address)
+    {
+        var module = BannerBrosModule.Instance;
+        if (module == null) return;
+
+        // Parse address
+        var parts = address.Split(':');
+        var serverAddress = parts[0];
+        var serverPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
+            ? p
+            : module.Config.DefaultPort;
+
+        // Save for next time
+        module.Config.LastServerAddress = address;
+
+        BannerBrosModule.LogMessage($"Connecting to {serverAddress}:{serverPort}...");
+
+        // Join the session
+        module.JoinSession(serverAddress, serverPort);
+
+        // Show connecting message
+        TaleWorlds.Core.InformationManager.ShowInquiry(
+            new TaleWorlds.Core.InquiryData(
+                "Connecting...",
+                $"Connecting to {serverAddress}:{serverPort}...\n\n" +
+                "Your party will sync with the host's world.\n" +
+                "You'll see other players on the campaign map!",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
     }
 
     private float _visibilityCheckTimer = 0;

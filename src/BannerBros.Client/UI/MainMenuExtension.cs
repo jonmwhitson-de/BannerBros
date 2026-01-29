@@ -115,9 +115,9 @@ public static class MainMenuExtension
         var inquiry = new InquiryData(
             "Join Co-op Session",
             "To join a co-op session:\n\n" +
-            "1. Start your own Campaign (Sandbox or Story)\n" +
+            "1. Start a Campaign (Sandbox or Story)\n" +
             "2. Create your character normally\n" +
-            "3. Once on the campaign map, press J to join\n\n" +
+            "3. When you enter the map, you'll be asked to join\n\n" +
             "Your party will sync with the host's world.\n" +
             "Both players will see each other on the map!",
             true,
