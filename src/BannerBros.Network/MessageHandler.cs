@@ -211,17 +211,16 @@ public class MessageHandler
 
     public void HandleClientCampaignReady(ClientCampaignReadyPacket packet, NetPeer peer)
     {
-        Console.WriteLine($"[BannerBros.Network] Client campaign ready: {packet.HeroName} (player {packet.PlayerId})");
-        BannerBros.Core.BannerBrosModule.LogMessage($"[Network] ClientCampaignReady received: {packet.HeroName} (player {packet.PlayerId}) from peer {peer.Id}");
+        Console.WriteLine($"[BannerBros.Network] ClientCampaignReady received: {packet.HeroName} (player {packet.PlayerId}) from peer {peer.Id}");
 
         // Only host processes campaign ready notifications
         if (!_networkManager.IsHost)
         {
-            BannerBros.Core.BannerBrosModule.LogMessage($"[Network] Not host, ignoring ClientCampaignReady");
+            Console.WriteLine($"[BannerBros.Network] Not host, ignoring ClientCampaignReady");
             return;
         }
 
-        BannerBros.Core.BannerBrosModule.LogMessage($"[Network] Invoking OnClientCampaignReadyReceived, subscribers: {(OnClientCampaignReadyReceived != null ? "yes" : "NO")}");
+        Console.WriteLine($"[BannerBros.Network] Invoking OnClientCampaignReadyReceived, subscribers: {(OnClientCampaignReadyReceived != null ? "yes" : "NO")}");
         OnClientCampaignReadyReceived?.Invoke(packet, peer.Id);
     }
 
