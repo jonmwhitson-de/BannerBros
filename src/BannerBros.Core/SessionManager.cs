@@ -623,8 +623,14 @@ public class SessionManager
     /// </summary>
     private void HandleClientCampaignReady(ClientCampaignReadyPacket packet, int peerId)
     {
+        BannerBrosModule.LogMessage($">>> HandleClientCampaignReady CALLED: {packet.HeroName} (player {packet.PlayerId}) from peer {peerId}");
+
         var networkManager = NetworkManager.Instance;
-        if (networkManager == null || !networkManager.IsHost) return;
+        if (networkManager == null || !networkManager.IsHost)
+        {
+            BannerBrosModule.LogMessage($"HandleClientCampaignReady: networkManager null or not host - RETURNING");
+            return;
+        }
 
         BannerBrosModule.LogMessage($"Client campaign ready: {packet.HeroName} (player {packet.PlayerId})");
         DebugLog.Log($"=== CLIENT CAMPAIGN READY: {packet.HeroName} ===");
