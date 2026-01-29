@@ -964,13 +964,31 @@ public class SessionManager
                     }
                 }
 
-                // Method 4: Try SetMoveGoToPoint to move the party there
+                // Method 4: Try SetMoveGoToPoint to move the party there (use reflection for API compatibility)
                 if (!positionSet)
                 {
                     try
                     {
-                        party.SetMoveGoToPoint(posVec2);
-                        DebugLog.Log($"Set SetMoveGoToPoint to ({spawnX}, {spawnY})");
+                        // Find the method - it may have different signatures in different versions
+                        var moveMethod = party.GetType().GetMethods()
+                            .FirstOrDefault(m => m.Name == "SetMoveGoToPoint");
+
+                        if (moveMethod != null)
+                        {
+                            var paramCount = moveMethod.GetParameters().Length;
+                            if (paramCount == 1)
+                            {
+                                moveMethod.Invoke(party, new object[] { posVec2 });
+                            }
+                            else if (paramCount == 2)
+                            {
+                                // Second param is NavigationType - use 0 (default/direct)
+                                var navType = moveMethod.GetParameters()[1].ParameterType;
+                                var defaultNav = Enum.ToObject(navType, 0);
+                                moveMethod.Invoke(party, new object[] { posVec2, defaultNav });
+                            }
+                            DebugLog.Log($"Set SetMoveGoToPoint to ({spawnX}, {spawnY})");
+                        }
                         // This moves the party over time, not instantly
                     }
                     catch (Exception ex)
