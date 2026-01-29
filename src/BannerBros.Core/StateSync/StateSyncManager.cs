@@ -81,12 +81,15 @@ public class StateSyncManager
         _syncedHeroIds.Clear();
         _pendingUpdates.Clear();
 
-        // Destroy shadow parties
+        // Hide and clear shadow parties
         foreach (var party in _shadowParties.Values)
         {
             try
             {
-                party?.RemoveParty();
+                if (party != null)
+                {
+                    party.IsVisible = false;
+                }
             }
             catch { }
         }
@@ -331,7 +334,7 @@ public class StateSyncManager
             BannerBrosModule.LogMessage($"[StateSync] Creating shadow party: {partyId} at ({x}, {y})");
 
             // Create a minimal party to represent the remote player
-            var party = MobileParty.CreateParty(partyId, null, null);
+            var party = MobileParty.CreateParty(partyId, null);
 
             if (party == null)
             {
