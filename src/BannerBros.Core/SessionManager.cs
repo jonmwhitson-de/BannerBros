@@ -2273,14 +2273,25 @@ public class SessionManager
     /// </summary>
     private void NotifyServerCampaignReady()
     {
+        BannerBrosModule.LogMessage("NotifyServerCampaignReady: Starting...");
         try
         {
             var localPlayer = _playerManager.GetLocalPlayer();
-            if (localPlayer == null) return;
+            if (localPlayer == null)
+            {
+                BannerBrosModule.LogMessage("NotifyServerCampaignReady: FAILED - localPlayer is null!");
+                return;
+            }
+            BannerBrosModule.LogMessage($"NotifyServerCampaignReady: localPlayer found, NetworkId={localPlayer.NetworkId}");
 
             var hero = Hero.MainHero;
             var party = MobileParty.MainParty;
-            if (hero == null || party == null) return;
+            if (hero == null || party == null)
+            {
+                BannerBrosModule.LogMessage($"NotifyServerCampaignReady: FAILED - hero={hero != null}, party={party != null}");
+                return;
+            }
+            BannerBrosModule.LogMessage($"NotifyServerCampaignReady: hero={hero.Name}, party={party.StringId}");
 
             var pos = party.GetPosition2D;
 
