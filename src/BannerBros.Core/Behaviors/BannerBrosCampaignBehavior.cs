@@ -3,6 +3,8 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.Conversation;
+using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using BannerBros.Core.StateSync;
 using BannerBros.Network;
@@ -159,8 +161,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
     {
         try
         {
-            TaleWorlds.Core.InformationManager.ShowInquiry(
-                new TaleWorlds.Core.InquiryData(
+            InformationManager.ShowInquiry(
+                new InquiryData(
                     "Co-op Multiplayer",
                     "Would you like to join a co-op server?\n\n" +
                     "You can play with friends by connecting to a host's game. " +
@@ -187,8 +189,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         try
         {
             var lastAddress = BannerBrosModule.Instance?.Config.LastServerAddress ?? "";
-            TaleWorlds.Core.InformationManager.ShowTextInquiry(
-                new TaleWorlds.Core.TextInquiryData(
+            InformationManager.ShowTextInquiry(
+                new TextInquiryData(
                     "Join Co-op Server",
                     "Enter the host's IP address:\n\nExample: 192.168.1.100 or 192.168.1.100:7777",
                     true,
@@ -231,8 +233,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         module.JoinSession(serverAddress, serverPort);
 
         // Show connecting message
-        TaleWorlds.Core.InformationManager.ShowInquiry(
-            new TaleWorlds.Core.InquiryData(
+        InformationManager.ShowInquiry(
+            new InquiryData(
                 "Connecting...",
                 $"Connecting to {serverAddress}:{serverPort}...\n\n" +
                 "Your party will sync with the host's world.\n" +
