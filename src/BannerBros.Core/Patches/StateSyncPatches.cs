@@ -104,6 +104,7 @@ public static class StateSyncPatches
     public static class MobilePartyTickPatch
     {
         private static int _tickCounter;
+        private static int _logCounter;
         private const int SyncEveryNTicks = 6; // ~10Hz at 60fps
 
         public static void Postfix(MobileParty __instance)
@@ -125,6 +126,13 @@ public static class StateSyncPatches
                 {
                     var pos = __instance.GetPosition2D;
                     stateSyncManager.OnServerPartyPositionChanged(partyId, pos.x, pos.y);
+
+                    // Log occasionally
+                    _logCounter++;
+                    if (_logCounter % 600 == 1) // Every ~60 seconds at 10Hz
+                    {
+                        BannerBrosModule.LogMessage($"[StateSyncPatch] Broadcasting {partyId} at ({pos.x:F1}, {pos.y:F1})");
+                    }
                 }
             }
             catch

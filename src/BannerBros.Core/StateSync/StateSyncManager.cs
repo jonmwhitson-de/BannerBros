@@ -106,8 +106,10 @@ public class StateSyncManager
     public void RegisterParty(MobileParty party)
     {
         if (party == null) return;
+        var alreadyRegistered = _syncedPartyIds.Contains(party.StringId);
         _syncedPartyIds.Add(party.StringId);
-        BannerBrosModule.LogMessage($"[StateSync] Registered party: {party.StringId}");
+        var pos = party.GetPosition2D;
+        BannerBrosModule.LogMessage($"[StateSync] Registered party: {party.StringId} at ({pos.x:F1}, {pos.y:F1}) - IsServer: {_isServer}, AlreadyRegistered: {alreadyRegistered}, Total: {_syncedPartyIds.Count}");
     }
 
     /// <summary>
@@ -168,11 +170,20 @@ public class StateSyncManager
     /// </summary>
     public void SendFullStateToClient(int peerId)
     {
-        if (!_isServer || !_initialized) return;
-        if (Campaign.Current == null) return;
+        if (!_isServer || !_initialized)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] SendFullStateToClient SKIPPED - IsServer: {_isServer}, Initialized: {_initialized}");
+            return;
+        }
+        if (Campaign.Current == null)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] SendFullStateToClient SKIPPED - No campaign");
+            return;
+        }
 
-        BannerBrosModule.LogMessage($"[StateSync] Sending full state to peer {peerId}");
+        BannerBrosModule.LogMessage($"[StateSync] Sending full state to peer {peerId} - {_syncedPartyIds.Count} synced parties");
 
+        int sentCount = 0;
         // Send all synced party positions
         foreach (var partyId in _syncedPartyIds)
         {
@@ -192,6 +203,12 @@ public class StateSyncManager
                 };
 
                 NetworkManager.Instance?.SendTo(peerId, packet, DeliveryMethod.ReliableOrdered);
+                sentCount++;
+                BannerBrosModule.LogMessage($"[StateSync] Sent party {partyId} pos ({pos.x:F1}, {pos.y:F1}) to peer {peerId}");
+            }
+            else
+            {
+                BannerBrosModule.LogMessage($"[StateSync] WARNING: Party {partyId} not found in campaign!");
             }
         }
 
@@ -204,7 +221,7 @@ public class StateSyncManager
         };
         NetworkManager.Instance?.SendTo(peerId, timePacket, DeliveryMethod.ReliableOrdered);
 
-        BannerBrosModule.LogMessage($"[StateSync] Full state sent to peer {peerId}");
+        BannerBrosModule.LogMessage($"[StateSync] Full state sent to peer {peerId}: {sentCount} parties, time={CampaignTime.Now.ToHours:F1}h");
     }
 
     private void BroadcastStateUpdate(StateUpdatePacket packet)
@@ -223,12 +240,17 @@ public class StateSyncManager
     {
         if (_isServer) return; // Server doesn't receive these
 
+        BannerBrosModule.LogMessage($"[StateSync] CLIENT received update: Type={packet.UpdateType}, Entity={packet.EntityId}, Pos=({packet.FloatValue1:F1}, {packet.FloatValue2:F1})");
+
         // Queue the update to be applied on the main thread
         lock (_pendingUpdates)
         {
             _pendingUpdates.Enqueue(packet);
+            BannerBrosModule.LogMessage($"[StateSync] Queued update, pending count: {_pendingUpdates.Count}");
         }
     }
+
+    private static int _applyLogCounter = 0;
 
     /// <summary>
     /// Apply pending state updates. Called from main game loop.
@@ -244,6 +266,13 @@ public class StateSyncManager
             if (_pendingUpdates.Count == 0) return;
             updates = _pendingUpdates.ToArray();
             _pendingUpdates.Clear();
+        }
+
+        // Log every 10th call to avoid spam
+        _applyLogCounter++;
+        if (_applyLogCounter % 10 == 1)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] Applying {updates.Length} pending updates");
         }
 
         foreach (var packet in updates)
@@ -277,24 +306,32 @@ public class StateSyncManager
         }
     }
 
+    private static int _positionLogCounter = 0;
+
     private void ApplyPartyPosition(string partyId, float x, float y)
     {
         var party = Campaign.Current?.MobileParties
             .FirstOrDefault(p => p.StringId == partyId);
 
+        bool fromShadow = false;
+        bool created = false;
+
         // Check shadow parties if not found
         if (party == null)
         {
             _shadowParties.TryGetValue(partyId, out party);
+            fromShadow = party != null;
         }
 
         if (party == null)
         {
             // Party doesn't exist locally - create a shadow party
+            BannerBrosModule.LogMessage($"[StateSync] Creating shadow party for {partyId} at ({x:F1}, {y:F1})");
             party = CreateShadowParty(partyId, x, y);
+            created = true;
             if (party == null)
             {
-                BannerBrosModule.LogMessage($"[StateSync] Failed to create shadow party for {partyId}");
+                BannerBrosModule.LogMessage($"[StateSync] FAILED to create shadow party for {partyId}");
                 return;
             }
         }
@@ -318,6 +355,13 @@ public class StateSyncManager
             party.Ai?.SetDoNotMakeNewDecisions(true);
         }
         catch { }
+
+        // Log occasionally
+        _positionLogCounter++;
+        if (created || _positionLogCounter % 100 == 1)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] Party {partyId} -> ({x:F1}, {y:F1}) [shadow:{fromShadow}, created:{created}]");
+        }
 
         OnPartyPositionChanged?.Invoke(partyId, newPos);
     }
