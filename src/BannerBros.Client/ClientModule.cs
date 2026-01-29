@@ -199,6 +199,17 @@ public class ClientModule : MBSubModuleBase
     private void HandleCoopInput()
     {
         var module = BannerBrosModule.Instance;
+
+        // J - Join Co-op (when in campaign but not connected)
+        if (Input.IsKeyPressed(InputKey.J))
+        {
+            if (module?.IsConnected != true && TaleWorlds.CampaignSystem.Campaign.Current != null)
+            {
+                ShowInGameJoinDialog();
+                return;
+            }
+        }
+
         if (module?.IsConnected != true) return;
 
         // Battle joining is handled through the game's normal encounter system
@@ -215,6 +226,15 @@ public class ClientModule : MBSubModuleBase
         {
             CoopSessionMenu.ShowPlayerList();
         }
+    }
+
+    /// <summary>
+    /// Shows the in-game join dialog when player is in their own campaign.
+    /// </summary>
+    private void ShowInGameJoinDialog()
+    {
+        BannerBrosModule.LogMessage("Opening in-game join dialog...");
+        MainMenuExtension.ShowInGameJoinDialog();
     }
 
     private void TryJoinNearbyBattle()

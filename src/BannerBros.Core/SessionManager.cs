@@ -654,9 +654,27 @@ public class SessionManager
                 BannerBrosModule.Instance?.PlayerSaveData.RegisterPlayer(
                     player.Name, result.HeroId ?? "", result.ClanId ?? "", result.PartyId ?? "");
 
+                // Register the shadow party for state sync
+                var shadowParty = Campaign.Current?.MobileParties
+                    .FirstOrDefault(p => p.StringId == result.PartyId);
+                if (shadowParty != null)
+                {
+                    StateSync.StateSyncManager.Instance.RegisterParty(shadowParty);
+                    BannerBrosModule.LogMessage($"Registered shadow party {result.PartyId} for state sync");
+                }
+
+                // Also register host's party if not already
+                if (MobileParty.MainParty != null)
+                {
+                    StateSync.StateSyncManager.Instance.RegisterParty(MobileParty.MainParty);
+                }
+
                 // Send success response
                 SendCharacterCreationResponse(peerId, packet.PlayerId, true, null,
                     result.HeroId, result.PartyId, result.ClanId, result.SpawnX, result.SpawnY);
+
+                // Send full state to the new client so they can see all synced parties
+                StateSync.StateSyncManager.Instance.SendFullStateToClient(peerId);
 
                 // Notify all players
                 BroadcastPlayerStateUpdate(player);

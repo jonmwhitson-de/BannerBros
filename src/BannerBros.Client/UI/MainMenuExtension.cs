@@ -111,7 +111,31 @@ public static class MainMenuExtension
 
     public static void ShowJoinDialog()
     {
-        // Simplified flow: Go directly to IP entry
+        // State sync architecture: Client must be in their own campaign first
+        var inquiry = new InquiryData(
+            "Join Co-op Session",
+            "To join a co-op session:\n\n" +
+            "1. Start your own Campaign (Sandbox or Story)\n" +
+            "2. Create your character normally\n" +
+            "3. Once on the campaign map, press J to join\n\n" +
+            "Your party will sync with the host's world.\n" +
+            "Both players will see each other on the map!",
+            true,
+            false,
+            "OK",
+            "",
+            null,
+            null
+        );
+        InformationManager.ShowInquiry(inquiry, true);
+    }
+
+    /// <summary>
+    /// Shows the in-game join dialog when player is already in a campaign.
+    /// This is the actual join flow for state sync architecture.
+    /// </summary>
+    public static void ShowInGameJoinDialog()
+    {
         InformationManager.ShowTextInquiry(
             new TextInquiryData(
                 "Join Co-op Session",
@@ -120,13 +144,60 @@ public static class MainMenuExtension
                 true,
                 "Connect",
                 "Cancel",
-                OnJoinAddressEntered,
+                OnInGameJoinAddressEntered,
                 null,
                 false,
                 text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
                 "",
                 BannerBrosModule.Instance?.Config.LastServerAddress ?? ""
             )
+        );
+    }
+
+    private static void OnInGameJoinAddressEntered(string address)
+    {
+        // Parse address
+        var parts = address.Split(':');
+        _pendingServerAddress = parts[0];
+        _pendingServerPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
+            ? p
+            : BannerBrosModule.Instance?.Config.DefaultPort ?? 7777;
+
+        // Save for next time
+        if (BannerBrosModule.Instance != null)
+        {
+            BannerBrosModule.Instance.Config.LastServerAddress = address;
+        }
+
+        // Connect directly - we're already in a campaign with our character
+        ConnectFromCampaign();
+    }
+
+    private static void ConnectFromCampaign()
+    {
+        var module = BannerBrosModule.Instance;
+        if (module == null) return;
+
+        BannerBrosModule.LogMessage($"Connecting to {_pendingServerAddress}:{_pendingServerPort}...");
+
+        // Join the session - state will sync via network
+        module.JoinSession(_pendingServerAddress, _pendingServerPort);
+
+        // Show connecting dialog
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Connecting...",
+                $"Connecting to {_pendingServerAddress}:{_pendingServerPort}...\n\n" +
+                "Your party will sync with the host's world.\n" +
+                "You'll see other players on the campaign map!",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
         );
     }
 
@@ -243,8 +314,8 @@ public static class MainMenuExtension
             new InquiryData(
                 "Connecting...",
                 $"Connecting as {character.Name}.\n\n" +
-                "The host's save file will transfer automatically.\n" +
-                "Game will load once transfer completes.",
+                "Your party will sync with the host's world.\n" +
+                "You'll see other players on the campaign map!",
                 true,
                 false,
                 "OK",
