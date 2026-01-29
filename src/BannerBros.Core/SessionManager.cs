@@ -2209,6 +2209,17 @@ public class SessionManager
         NetworkManager.Instance?.SetLocalPeerId(packet.AssignedPlayerId);
         _playerManager.LocalPlayerId = packet.AssignedPlayerId;
 
+        // Add ourselves as a player
+        var localPlayer = new CoopPlayer
+        {
+            NetworkId = packet.AssignedPlayerId,
+            Name = BannerBrosModule.Instance?.Config.PlayerName ?? "Player",
+            IsHost = false,
+            State = PlayerState.OnMap
+        };
+        _playerManager.AddPlayer(localPlayer);
+        BannerBrosModule.LogMessage($"Added local player to manager: ID={localPlayer.NetworkId}, Name={localPlayer.Name}");
+
         // Add existing players
         if (!string.IsNullOrEmpty(packet.ExistingPlayersJson))
         {
