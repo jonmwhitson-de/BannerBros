@@ -2293,6 +2293,7 @@ public class SessionManager
 
             try { packet.BodyPropertiesXml = hero.BodyProperties.ToString(); } catch { }
 
+            BannerBrosModule.LogMessage($"Sending ClientCampaignReadyPacket: {packet.HeroName}, PlayerId={packet.PlayerId}, Pos=({packet.MapX:F1}, {packet.MapY:F1})");
             NetworkManager.Instance?.SendToServer(packet);
             BannerBrosModule.LogMessage($"Sent campaign ready: {packet.HeroName}");
         }
