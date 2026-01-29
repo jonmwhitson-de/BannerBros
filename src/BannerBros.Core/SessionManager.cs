@@ -818,10 +818,87 @@ public class SessionManager
                 DebugLog.Log($"Party MemberRoster count: {party.MemberRoster?.TotalManCount ?? 0}");
                 DebugLog.Log($"Party LeaderHero: {party.LeaderHero?.Name?.ToString() ?? "null"}");
 
-                // Try to move party to client's position using reflection for API compatibility
+                // First, make sure party is not in a settlement (which causes position (0,0))
                 try
                 {
-                    var posVec2 = new Vec2(spawnX, spawnY);
+                    if (party.CurrentSettlement != null)
+                    {
+                        DebugLog.Log($"Party is in settlement {party.CurrentSettlement.Name} - forcing leave");
+
+                        // Try LeaveSettlementAction
+                        try
+                        {
+                            var leaveActionType = Type.GetType("TaleWorlds.CampaignSystem.Actions.LeaveSettlementAction, TaleWorlds.CampaignSystem");
+                            if (leaveActionType != null)
+                            {
+                                var applyForParty = leaveActionType.GetMethod("ApplyForParty",
+                                    BindingFlags.Public | BindingFlags.Static);
+                                if (applyForParty != null)
+                                {
+                                    applyForParty.Invoke(null, new object[] { party });
+                                    DebugLog.Log("Called LeaveSettlementAction.ApplyForParty");
+                                }
+                            }
+                        }
+                        catch (Exception leaveEx)
+                        {
+                            DebugLog.Log($"LeaveSettlementAction failed: {leaveEx.Message}");
+                        }
+
+                        // Also try setting CurrentSettlement to null directly
+                        if (party.CurrentSettlement != null)
+                        {
+                            try
+                            {
+                                var settlementField = typeof(MobileParty).GetField("_currentSettlement",
+                                    BindingFlags.NonPublic | BindingFlags.Instance);
+                                if (settlementField != null)
+                                {
+                                    settlementField.SetValue(party, null);
+                                    DebugLog.Log("Set _currentSettlement to null");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                DebugLog.Log($"Failed to clear settlement: {ex.Message}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        DebugLog.Log("Party is not in a settlement");
+                    }
+
+                    // Also check if hero is in settlement
+                    if (hero.CurrentSettlement != null)
+                    {
+                        DebugLog.Log($"Hero is in settlement {hero.CurrentSettlement.Name}");
+                        try
+                        {
+                            var leaveActionType = Type.GetType("TaleWorlds.CampaignSystem.Actions.LeaveSettlementAction, TaleWorlds.CampaignSystem");
+                            var applyForChar = leaveActionType?.GetMethod("ApplyForCharacterOnly",
+                                BindingFlags.Public | BindingFlags.Static);
+                            if (applyForChar != null)
+                            {
+                                applyForChar.Invoke(null, new object[] { hero });
+                                DebugLog.Log("Called LeaveSettlementAction.ApplyForCharacterOnly for hero");
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"Settlement check error: {ex.Message}");
+                }
+
+                // Try to move party to client's position using multiple approaches
+                var posVec2 = new Vec2(spawnX, spawnY);
+                bool positionSet = false;
+
+                // Method 1: Try Position2D setter via reflection
+                try
+                {
                     var posProp = party.GetType().GetProperty("Position2D");
                     DebugLog.Log($"Position2D property: CanRead={posProp?.CanRead}, CanWrite={posProp?.CanWrite}");
 
@@ -829,19 +906,126 @@ public class SessionManager
                     {
                         posProp.SetValue(party, posVec2);
                         DebugLog.Log($"Set Position2D to ({spawnX}, {spawnY})");
+                        positionSet = true;
                     }
-                    else
-                    {
-                        DebugLog.Log("Position2D is NOT writable!");
-                    }
-
-                    // Verify position was set
-                    var actualPos = party.GetPosition2D;
-                    DebugLog.Log($"Party actual position: ({actualPos.x}, {actualPos.y})");
                 }
                 catch (Exception ex)
                 {
-                    DebugLog.Log($"Failed to set party position: {ex.Message}");
+                    DebugLog.Log($"Position2D setter failed: {ex.Message}");
+                }
+
+                // Method 2: Try internal _position field via reflection
+                if (!positionSet)
+                {
+                    try
+                    {
+                        var posField = typeof(MobileParty).GetField("_position",
+                            BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (posField != null)
+                        {
+                            posField.SetValue(party, posVec2);
+                            DebugLog.Log($"Set _position field to ({spawnX}, {spawnY})");
+                            positionSet = true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"_position field failed: {ex.Message}");
+                    }
+                }
+
+                // Method 3: Try InitializeMobilePartyAroundPosition
+                if (!positionSet)
+                {
+                    try
+                    {
+                        var initMethod = party.GetType().GetMethod("InitializeMobilePartyAroundPosition",
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (initMethod != null)
+                        {
+                            var paramCount = initMethod.GetParameters().Length;
+                            if (paramCount == 1)
+                            {
+                                initMethod.Invoke(party, new object[] { posVec2 });
+                                DebugLog.Log($"Called InitializeMobilePartyAroundPosition({spawnX}, {spawnY})");
+                                positionSet = true;
+                            }
+                            else if (paramCount == 2)
+                            {
+                                initMethod.Invoke(party, new object[] { posVec2, 0f });
+                                DebugLog.Log($"Called InitializeMobilePartyAroundPosition with 2 params");
+                                positionSet = true;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"InitializeMobilePartyAroundPosition failed: {ex.Message}");
+                    }
+                }
+
+                // Method 4: Try SetMoveGoToPoint to move the party there
+                if (!positionSet)
+                {
+                    try
+                    {
+                        party.SetMoveGoToPoint(posVec2);
+                        DebugLog.Log($"Set SetMoveGoToPoint to ({spawnX}, {spawnY})");
+                        // This moves the party over time, not instantly
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"SetMoveGoToPoint failed: {ex.Message}");
+                    }
+                }
+
+                // Verify position
+                try
+                {
+                    var actualPos = party.GetPosition2D;
+                    DebugLog.Log($"Party actual position after all attempts: ({actualPos.x}, {actualPos.y})");
+
+                    // If still at (0,0), try one more approach - direct internal state
+                    if (actualPos.x == 0 && actualPos.y == 0)
+                    {
+                        DebugLog.Log("Position still (0,0) - trying MapEventSide approach...");
+
+                        // Try to teleport via the Party's visual position
+                        try
+                        {
+                            var setVisualPosMethod = party.GetType().GetMethod("SetVisualPosition",
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                            if (setVisualPosMethod != null)
+                            {
+                                setVisualPosMethod.Invoke(party, new object[] { posVec2 });
+                                DebugLog.Log("Called SetVisualPosition");
+                            }
+                        }
+                        catch { }
+
+                        // Also try Party.Position property if different from Position2D
+                        try
+                        {
+                            var posProp2 = party.GetType().GetProperty("Position",
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                            if (posProp2?.CanWrite == true)
+                            {
+                                // Might be Vec3
+                                if (posProp2.PropertyType.Name.Contains("Vec3"))
+                                {
+                                    var vec3Type = posProp2.PropertyType;
+                                    var vec3 = Activator.CreateInstance(vec3Type, spawnX, spawnY, 0f);
+                                    posProp2.SetValue(party, vec3);
+                                    DebugLog.Log("Set Position (Vec3) property");
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"Failed to verify party position: {ex.Message}");
                 }
 
                 // Log visibility state
