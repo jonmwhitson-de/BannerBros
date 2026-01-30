@@ -892,229 +892,12 @@ public class SessionManager
                     DebugLog.Log($"Settlement check error: {ex.Message}");
                 }
 
-                // Try to move party to client's position using multiple approaches
-                // Note: Bannerlord uses CampaignVec2 internally, not Vec2
-                var posVec2 = new Vec2(spawnX, spawnY);
-                bool positionSet = false;
+                // Teleport party to spawn position using the dedicated helper
+                TeleportPartyToPosition(party, spawnX, spawnY);
 
-                // Create CampaignVec2 for methods that need it
-                object? campaignVec2 = null;
-                try
-                {
-                    var campaignVec2Type = Type.GetType("TaleWorlds.CampaignSystem.CampaignVec2, TaleWorlds.CampaignSystem");
-                    if (campaignVec2Type != null)
-                    {
-                        // Try constructor with x, y floats
-                        var ctor = campaignVec2Type.GetConstructor(new[] { typeof(float), typeof(float) });
-                        if (ctor != null)
-                        {
-                            campaignVec2 = ctor.Invoke(new object[] { spawnX, spawnY });
-                            DebugLog.Log($"Created CampaignVec2({spawnX}, {spawnY})");
-                        }
-                        else
-                        {
-                            // Try constructor with Vec2
-                            ctor = campaignVec2Type.GetConstructor(new[] { typeof(Vec2) });
-                            if (ctor != null)
-                            {
-                                campaignVec2 = ctor.Invoke(new object[] { posVec2 });
-                                DebugLog.Log("Created CampaignVec2 from Vec2");
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.Log($"Failed to create CampaignVec2: {ex.Message}");
-                }
-
-                // Method 1: Try Position2D setter via reflection (may need Vec2 or CampaignVec2)
-                try
-                {
-                    var posProp = party.GetType().GetProperty("Position2D");
-                    DebugLog.Log($"Position2D property: CanRead={posProp?.CanRead}, CanWrite={posProp?.CanWrite}");
-
-                    if (posProp?.CanWrite == true)
-                    {
-                        var propType = posProp.PropertyType;
-                        if (propType.Name.Contains("Campaign") && campaignVec2 != null)
-                        {
-                            posProp.SetValue(party, campaignVec2);
-                        }
-                        else
-                        {
-                            posProp.SetValue(party, posVec2);
-                        }
-                        DebugLog.Log($"Set Position2D to ({spawnX}, {spawnY})");
-                        positionSet = true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.Log($"Position2D setter failed: {ex.Message}");
-                }
-
-                // Method 2: Try internal _position field via reflection (uses CampaignVec2)
-                if (!positionSet)
-                {
-                    try
-                    {
-                        var posField = typeof(MobileParty).GetField("_position",
-                            BindingFlags.NonPublic | BindingFlags.Instance);
-                        if (posField != null && campaignVec2 != null)
-                        {
-                            posField.SetValue(party, campaignVec2);
-                            DebugLog.Log($"Set _position field to ({spawnX}, {spawnY})");
-                            positionSet = true;
-                        }
-                        else if (posField != null)
-                        {
-                            // Try with Vec2 anyway
-                            posField.SetValue(party, posVec2);
-                            DebugLog.Log($"Set _position field (Vec2) to ({spawnX}, {spawnY})");
-                            positionSet = true;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        DebugLog.Log($"_position field failed: {ex.Message}");
-                    }
-                }
-
-                // Method 3: Try InitializeMobilePartyAroundPosition (needs CampaignVec2)
-                if (!positionSet)
-                {
-                    try
-                    {
-                        // Find the specific method that takes CampaignVec2
-                        var initMethods = party.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                            .Where(m => m.Name == "InitializeMobilePartyAroundPosition")
-                            .ToList();
-
-                        DebugLog.Log($"Found {initMethods.Count} InitializeMobilePartyAroundPosition methods");
-
-                        foreach (var initMethod in initMethods)
-                        {
-                            var paramTypes = initMethod.GetParameters().Select(p => p.ParameterType.Name).ToArray();
-                            DebugLog.Log($"  Method params: {string.Join(", ", paramTypes)}");
-
-                            if (initMethod.GetParameters().Length >= 1)
-                            {
-                                var firstParamType = initMethod.GetParameters()[0].ParameterType;
-                                object posArg = firstParamType.Name.Contains("Campaign") && campaignVec2 != null
-                                    ? campaignVec2
-                                    : posVec2;
-
-                                try
-                                {
-                                    if (initMethod.GetParameters().Length == 1)
-                                    {
-                                        initMethod.Invoke(party, new object[] { posArg });
-                                    }
-                                    else if (initMethod.GetParameters().Length == 2)
-                                    {
-                                        initMethod.Invoke(party, new object[] { posArg, 0f });
-                                    }
-                                    DebugLog.Log($"Called InitializeMobilePartyAroundPosition successfully");
-                                    positionSet = true;
-                                    break;
-                                }
-                                catch (Exception innerEx)
-                                {
-                                    DebugLog.Log($"  Method failed: {innerEx.Message}");
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        DebugLog.Log($"InitializeMobilePartyAroundPosition failed: {ex.Message}");
-                    }
-                }
-
-                // Method 4: Try SetMoveGoToPoint (needs CampaignVec2)
-                if (!positionSet)
-                {
-                    try
-                    {
-                        var moveMethod = party.GetType().GetMethods()
-                            .FirstOrDefault(m => m.Name == "SetMoveGoToPoint");
-
-                        if (moveMethod != null)
-                        {
-                            var firstParamType = moveMethod.GetParameters()[0].ParameterType;
-                            object posArg = firstParamType.Name.Contains("Campaign") && campaignVec2 != null
-                                ? campaignVec2
-                                : posVec2;
-
-                            var paramCount = moveMethod.GetParameters().Length;
-                            if (paramCount == 1)
-                            {
-                                moveMethod.Invoke(party, new object[] { posArg });
-                            }
-                            else if (paramCount == 2)
-                            {
-                                var navType = moveMethod.GetParameters()[1].ParameterType;
-                                var defaultNav = Enum.ToObject(navType, 0);
-                                moveMethod.Invoke(party, new object[] { posArg, defaultNav });
-                            }
-                            DebugLog.Log($"Set SetMoveGoToPoint to ({spawnX}, {spawnY})");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        DebugLog.Log($"SetMoveGoToPoint failed: {ex.Message}");
-                    }
-                }
-
-                // Verify position
-                try
-                {
-                    var actualPos = party.GetPosition2D;
-                    DebugLog.Log($"Party actual position after all attempts: ({actualPos.x}, {actualPos.y})");
-
-                    // If still at (0,0), try one more approach - direct internal state
-                    if (actualPos.x == 0 && actualPos.y == 0)
-                    {
-                        DebugLog.Log("Position still (0,0) - trying MapEventSide approach...");
-
-                        // Try to teleport via the Party's visual position
-                        try
-                        {
-                            var setVisualPosMethod = party.GetType().GetMethod("SetVisualPosition",
-                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (setVisualPosMethod != null)
-                            {
-                                setVisualPosMethod.Invoke(party, new object[] { posVec2 });
-                                DebugLog.Log("Called SetVisualPosition");
-                            }
-                        }
-                        catch { }
-
-                        // Also try Party.Position property if different from Position2D
-                        try
-                        {
-                            var posProp2 = party.GetType().GetProperty("Position",
-                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (posProp2?.CanWrite == true)
-                            {
-                                // Might be Vec3
-                                if (posProp2.PropertyType.Name.Contains("Vec3"))
-                                {
-                                    var vec3Type = posProp2.PropertyType;
-                                    var vec3 = Activator.CreateInstance(vec3Type, spawnX, spawnY, 0f);
-                                    posProp2.SetValue(party, vec3);
-                                    DebugLog.Log("Set Position (Vec3) property");
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.Log($"Failed to verify party position: {ex.Message}");
-                }
+                // Verify final position
+                var finalPos = party.GetPosition2D;
+                DebugLog.Log($"Party final position: ({finalPos.x}, {finalPos.y})");
 
                 // Log visibility state
                 DebugLog.Log($"Party IsVisible: {party.IsVisible}");
@@ -2249,6 +2032,325 @@ public class SessionManager
             BannerBrosModule.LogMessage($"Minimal party creation failed: {ex.Message}");
         }
         return null;
+    }
+
+    /// <summary>
+    /// Teleports a party to a specific position using multiple fallback methods.
+    /// This is the most reliable way to set a party's position in Bannerlord.
+    /// </summary>
+    private bool TeleportPartyToPosition(MobileParty party, float x, float y)
+    {
+        if (party == null) return false;
+
+        DebugLog.Log($"TeleportPartyToPosition: Attempting to move {party.StringId} to ({x}, {y})");
+
+        // Create position objects for both types
+        var vec2Pos = new Vec2(x, y);
+        object? campaignVec2Pos = CreateCampaignVec2(x, y);
+
+        // Method 1: InitializeMobilePartyAroundPosition (most reliable)
+        if (TryInitializeAtPosition(party, vec2Pos, campaignVec2Pos))
+        {
+            DebugLog.Log("TeleportPartyToPosition: Success via InitializeMobilePartyAroundPosition");
+            return true;
+        }
+
+        // Method 2: Direct Position2D property set
+        if (TrySetPosition2D(party, vec2Pos, campaignVec2Pos))
+        {
+            DebugLog.Log("TeleportPartyToPosition: Success via Position2D");
+            return true;
+        }
+
+        // Method 3: Internal _position field
+        if (TrySetPositionField(party, campaignVec2Pos ?? vec2Pos))
+        {
+            DebugLog.Log("TeleportPartyToPosition: Success via _position field");
+            return true;
+        }
+
+        // Method 4: SetMoveGoToPoint (not instant, but will move there)
+        if (TrySetMoveTarget(party, vec2Pos, campaignVec2Pos))
+        {
+            DebugLog.Log("TeleportPartyToPosition: Set move target (not instant teleport)");
+            return true;
+        }
+
+        DebugLog.Log("TeleportPartyToPosition: All methods failed!");
+        return false;
+    }
+
+    private object? CreateCampaignVec2(float x, float y)
+    {
+        try
+        {
+            // Try to find CampaignVec2 type in the loaded assemblies
+            var campaignVec2Type = typeof(Campaign).Assembly.GetType("TaleWorlds.CampaignSystem.CampaignVec2");
+            if (campaignVec2Type == null)
+            {
+                DebugLog.Log("CampaignVec2 type not found");
+                return null;
+            }
+
+            // Try (float, float) constructor
+            var ctor = campaignVec2Type.GetConstructor(new[] { typeof(float), typeof(float) });
+            if (ctor != null)
+            {
+                var result = ctor.Invoke(new object[] { x, y });
+                DebugLog.Log($"Created CampaignVec2 via (float, float) ctor");
+                return result;
+            }
+
+            // Try (Vec2) constructor
+            ctor = campaignVec2Type.GetConstructor(new[] { typeof(Vec2) });
+            if (ctor != null)
+            {
+                var result = ctor.Invoke(new object[] { new Vec2(x, y) });
+                DebugLog.Log($"Created CampaignVec2 via (Vec2) ctor");
+                return result;
+            }
+
+            // Try creating via static From method if it exists
+            var fromMethod = campaignVec2Type.GetMethod("From", BindingFlags.Public | BindingFlags.Static);
+            if (fromMethod != null)
+            {
+                var result = fromMethod.Invoke(null, new object[] { x, y });
+                DebugLog.Log($"Created CampaignVec2 via From method");
+                return result;
+            }
+
+            DebugLog.Log("No CampaignVec2 constructor found");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Log($"CreateCampaignVec2 error: {ex.Message}");
+        }
+        return null;
+    }
+
+    private bool TryInitializeAtPosition(MobileParty party, Vec2 vec2Pos, object? campaignVec2Pos)
+    {
+        try
+        {
+            // Find InitializeMobilePartyAroundPosition method
+            var methods = typeof(MobileParty).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Where(m => m.Name == "InitializeMobilePartyAroundPosition")
+                .ToList();
+
+            if (methods.Count == 0)
+            {
+                DebugLog.Log("No InitializeMobilePartyAroundPosition method found");
+                return false;
+            }
+
+            foreach (var method in methods)
+            {
+                try
+                {
+                    var parameters = method.GetParameters();
+                    DebugLog.Log($"Trying InitializeMobilePartyAroundPosition with {parameters.Length} params: " +
+                        string.Join(", ", parameters.Select(p => p.ParameterType.Name)));
+
+                    if (parameters.Length == 0) continue;
+
+                    // Determine which position object to use based on first parameter type
+                    var firstParamType = parameters[0].ParameterType;
+                    object posArg;
+
+                    if (firstParamType.Name.Contains("Campaign"))
+                    {
+                        if (campaignVec2Pos == null)
+                        {
+                            DebugLog.Log("Need CampaignVec2 but don't have one");
+                            continue;
+                        }
+                        posArg = campaignVec2Pos;
+                    }
+                    else
+                    {
+                        posArg = vec2Pos;
+                    }
+
+                    // Build arguments based on parameter count
+                    object[] args;
+                    if (parameters.Length == 1)
+                    {
+                        args = new[] { posArg };
+                    }
+                    else if (parameters.Length == 2)
+                    {
+                        // Second param is typically radius (float)
+                        args = new object[] { posArg, 0f };
+                    }
+                    else
+                    {
+                        continue; // Skip methods with more params
+                    }
+
+                    method.Invoke(party, args);
+
+                    // Verify it worked
+                    var newPos = party.GetPosition2D;
+                    DebugLog.Log($"After initialize: position = ({newPos.x}, {newPos.y})");
+
+                    if (Math.Abs(newPos.x - vec2Pos.x) < 10f && Math.Abs(newPos.y - vec2Pos.y) < 10f)
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"Method invocation failed: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Log($"TryInitializeAtPosition error: {ex.Message}");
+        }
+        return false;
+    }
+
+    private bool TrySetPosition2D(MobileParty party, Vec2 vec2Pos, object? campaignVec2Pos)
+    {
+        try
+        {
+            var posProp = typeof(MobileParty).GetProperty("Position2D",
+                BindingFlags.Public | BindingFlags.Instance);
+
+            if (posProp == null)
+            {
+                DebugLog.Log("Position2D property not found");
+                return false;
+            }
+
+            DebugLog.Log($"Position2D: CanRead={posProp.CanRead}, CanWrite={posProp.CanWrite}, Type={posProp.PropertyType.Name}");
+
+            if (!posProp.CanWrite)
+            {
+                DebugLog.Log("Position2D is not writable");
+                return false;
+            }
+
+            object valueToSet;
+            if (posProp.PropertyType.Name.Contains("Campaign") && campaignVec2Pos != null)
+            {
+                valueToSet = campaignVec2Pos;
+            }
+            else
+            {
+                valueToSet = vec2Pos;
+            }
+
+            posProp.SetValue(party, valueToSet);
+
+            var newPos = party.GetPosition2D;
+            DebugLog.Log($"After Position2D set: position = ({newPos.x}, {newPos.y})");
+
+            return Math.Abs(newPos.x - vec2Pos.x) < 1f && Math.Abs(newPos.y - vec2Pos.y) < 1f;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Log($"TrySetPosition2D error: {ex.Message}");
+            return false;
+        }
+    }
+
+    private bool TrySetPositionField(MobileParty party, object posValue)
+    {
+        try
+        {
+            var posField = typeof(MobileParty).GetField("_position",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+
+            if (posField == null)
+            {
+                DebugLog.Log("_position field not found");
+                return false;
+            }
+
+            DebugLog.Log($"_position field type: {posField.FieldType.Name}, value type: {posValue.GetType().Name}");
+
+            // Check if types match
+            if (posField.FieldType != posValue.GetType())
+            {
+                DebugLog.Log("Type mismatch for _position field");
+                return false;
+            }
+
+            posField.SetValue(party, posValue);
+
+            var newPos = party.GetPosition2D;
+            var targetX = posValue.GetType().GetField("X")?.GetValue(posValue) as float? ?? 0;
+            var targetY = posValue.GetType().GetField("Y")?.GetValue(posValue) as float? ?? 0;
+
+            DebugLog.Log($"After _position set: position = ({newPos.x}, {newPos.y})");
+
+            return Math.Abs(newPos.x - targetX) < 1f && Math.Abs(newPos.y - targetY) < 1f;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Log($"TrySetPositionField error: {ex.Message}");
+            return false;
+        }
+    }
+
+    private bool TrySetMoveTarget(MobileParty party, Vec2 vec2Pos, object? campaignVec2Pos)
+    {
+        try
+        {
+            var methods = typeof(MobileParty).GetMethods()
+                .Where(m => m.Name == "SetMoveGoToPoint")
+                .ToList();
+
+            if (methods.Count == 0)
+            {
+                DebugLog.Log("SetMoveGoToPoint method not found");
+                return false;
+            }
+
+            foreach (var method in methods)
+            {
+                try
+                {
+                    var parameters = method.GetParameters();
+                    if (parameters.Length == 0) continue;
+
+                    var firstParamType = parameters[0].ParameterType;
+                    object posArg = firstParamType.Name.Contains("Campaign") && campaignVec2Pos != null
+                        ? campaignVec2Pos
+                        : vec2Pos;
+
+                    if (parameters.Length == 1)
+                    {
+                        method.Invoke(party, new[] { posArg });
+                    }
+                    else if (parameters.Length == 2)
+                    {
+                        // Second param is NavigationType enum - use 0 (default)
+                        var navType = parameters[1].ParameterType;
+                        var defaultNav = Enum.ToObject(navType, 0);
+                        method.Invoke(party, new[] { posArg, defaultNav });
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    DebugLog.Log("SetMoveGoToPoint succeeded");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"SetMoveGoToPoint variant failed: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Log($"TrySetMoveTarget error: {ex.Message}");
+        }
+        return false;
     }
 
     private Clan? CreatePlayerClan(CultureObject culture, string playerName)
