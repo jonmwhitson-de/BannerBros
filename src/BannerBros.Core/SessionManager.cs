@@ -2121,6 +2121,15 @@ public class SessionManager
                 return result;
             }
 
+            // Try (Vec2, Boolean) constructor - Vec2 position + IsOnLand flag
+            ctor = campaignVec2Type.GetConstructor(new[] { typeof(Vec2), typeof(bool) });
+            if (ctor != null)
+            {
+                var result = ctor.Invoke(new object[] { new Vec2(x, y), true }); // true = IsOnLand
+                DebugLog.Log($"Created CampaignVec2 via (Vec2, Boolean) ctor");
+                return result;
+            }
+
             // Try creating via static From method if it exists
             var fromMethod = campaignVec2Type.GetMethod("From", BindingFlags.Public | BindingFlags.Static);
             if (fromMethod != null)
