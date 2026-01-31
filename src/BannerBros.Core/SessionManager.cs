@@ -2088,8 +2088,19 @@ public class SessionManager
             var campaignVec2Type = typeof(Campaign).Assembly.GetType("TaleWorlds.CampaignSystem.CampaignVec2");
             if (campaignVec2Type == null)
             {
-                DebugLog.Log("CampaignVec2 type not found");
+                DebugLog.Log("CampaignVec2 type not found in assembly");
                 return null;
+            }
+
+            DebugLog.Log($"Found CampaignVec2 type: {campaignVec2Type.FullName}, IsValueType: {campaignVec2Type.IsValueType}");
+
+            // Log all available constructors for debugging
+            var allCtors = campaignVec2Type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            DebugLog.Log($"CampaignVec2 has {allCtors.Length} constructors");
+            foreach (var c in allCtors)
+            {
+                var paramStr = string.Join(", ", c.GetParameters().Select(p => p.ParameterType.Name));
+                DebugLog.Log($"  Constructor: ({paramStr})");
             }
 
             // Try (float, float) constructor
@@ -2119,7 +2130,65 @@ public class SessionManager
                 return result;
             }
 
-            DebugLog.Log("No CampaignVec2 constructor found");
+            // For structs: create default instance and set X/Y fields
+            if (campaignVec2Type.IsValueType)
+            {
+                DebugLog.Log("CampaignVec2 is a struct, trying default + field set");
+                var instance = Activator.CreateInstance(campaignVec2Type);
+
+                // Try to set X and Y fields
+                var xField = campaignVec2Type.GetField("X", BindingFlags.Public | BindingFlags.Instance);
+                var yField = campaignVec2Type.GetField("Y", BindingFlags.Public | BindingFlags.Instance);
+
+                if (xField != null && yField != null)
+                {
+                    // For structs we need to box, modify, return
+                    xField.SetValue(instance, x);
+                    yField.SetValue(instance, y);
+                    DebugLog.Log($"Created CampaignVec2 via default + X/Y fields");
+                    return instance;
+                }
+
+                // Try lowercase x/y
+                xField = campaignVec2Type.GetField("x", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                yField = campaignVec2Type.GetField("y", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+                if (xField != null && yField != null)
+                {
+                    xField.SetValue(instance, x);
+                    yField.SetValue(instance, y);
+                    DebugLog.Log($"Created CampaignVec2 via default + x/y fields");
+                    return instance;
+                }
+
+                // Log available fields
+                var allFields = campaignVec2Type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                DebugLog.Log($"CampaignVec2 fields: {string.Join(", ", allFields.Select(f => $"{f.Name}:{f.FieldType.Name}"))}");
+            }
+
+            // Try implicit conversion from Vec2
+            var implicitOp = campaignVec2Type.GetMethod("op_Implicit",
+                BindingFlags.Public | BindingFlags.Static,
+                null, new[] { typeof(Vec2) }, null);
+            if (implicitOp != null)
+            {
+                var result = implicitOp.Invoke(null, new object[] { new Vec2(x, y) });
+                DebugLog.Log($"Created CampaignVec2 via implicit conversion from Vec2");
+                return result;
+            }
+
+            // Try explicit conversion from Vec2
+            var explicitOp = campaignVec2Type.GetMethod("op_Explicit",
+                BindingFlags.Public | BindingFlags.Static,
+                null, new[] { typeof(Vec2) }, null);
+            if (explicitOp != null)
+            {
+                var result = explicitOp.Invoke(null, new object[] { new Vec2(x, y) });
+                DebugLog.Log($"Created CampaignVec2 via explicit conversion from Vec2");
+                return result;
+            }
+
+            DebugLog.Log("No CampaignVec2 creation method found");
         }
         catch (Exception ex)
         {
