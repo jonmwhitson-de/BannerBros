@@ -19,8 +19,10 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 {
     private float _syncTimer;
     private float _worldSyncTimer;
+    private float _partyBatchTimer;
     private const float SyncInterval = 0.1f; // 10 times per second
     private const float WorldSyncInterval = 1.0f; // Once per second
+    private const float PartyBatchInterval = 0.5f; // Batch sync of all parties (2x per second)
 
     private float _lastX;
     private float _lastY;
@@ -28,6 +30,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
     private bool _campaignReady;
     private float _readyCheckTimer;
     private bool _joinPopupShown;
+    private int _batchSequenceNumber;
 
     public override void RegisterEvents()
     {
@@ -124,6 +127,7 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             // Accumulate time
             _syncTimer += dt;
             _worldSyncTimer += dt;
+            _partyBatchTimer += dt;
 
             // Sync player states at fixed interval
             if (_syncTimer >= SyncInterval)
@@ -137,6 +141,13 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             {
                 _worldSyncTimer = 0;
                 SyncWorldState();
+            }
+
+            // Host broadcasts all party positions periodically (efficient batch sync)
+            if (module.IsHost && _partyBatchTimer >= PartyBatchInterval)
+            {
+                _partyBatchTimer = 0;
+                BroadcastWorldPartyBatch();
             }
 
             // Apply pending state updates (client only)
@@ -265,9 +276,11 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
         var module = BannerBrosModule.Instance;
         if (module?.IsConnected != true) return;
+        if (Campaign.Current == null) return;
 
         var isHost = module.IsHost;
         var localPlayer = module.PlayerManager.GetLocalPlayer();
+        var localMainPartyId = MobileParty.MainParty?.StringId;
 
         foreach (var player in module.PlayerManager.Players.Values.ToList())
         {
@@ -275,8 +288,26 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
 
             try
             {
-                var party = Campaign.Current?.MobileParties
-                    .FirstOrDefault(p => p.StringId == player.PartyId);
+                bool isLocalParty = (localPlayer != null && player.NetworkId == localPlayer.NetworkId);
+
+                // For remote players on the client, we need to handle party ID conflicts
+                // If the remote player's party ID matches our local party ID, use a remapped ID
+                string effectivePartyId = player.PartyId;
+                if (!isHost && !isLocalParty && player.PartyId == localMainPartyId)
+                {
+                    // This remote player has the same party ID as us - use shadow ID
+                    effectivePartyId = $"remote_{player.PartyId}";
+                }
+
+                var party = Campaign.Current.MobileParties
+                    .FirstOrDefault(p => p.StringId == effectivePartyId);
+
+                // On client, create shadow party for remote players if not found
+                if (party == null && !isHost && !isLocalParty)
+                {
+                    // Try to create shadow party for this remote player
+                    party = CreateClientShadowPartyForPlayer(effectivePartyId, player);
+                }
 
                 if (party != null)
                 {
@@ -286,9 +317,6 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         try { party.IsVisible = true; }
                         catch { }
                     }
-
-                    // Sync direction depends on who controls this party
-                    bool isLocalParty = (localPlayer != null && player.NetworkId == localPlayer.NetworkId);
 
                     if (isLocalParty)
                     {
@@ -303,16 +331,11 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                         // (except on host where we have direct control)
                         if (!isHost)
                         {
-                            var newPos = new TaleWorlds.Library.Vec2(player.MapPositionX, player.MapPositionY);
-                            try
-                            {
-                                var posProp = party.GetType().GetProperty("Position2D");
-                                if (posProp?.CanWrite == true)
-                                {
-                                    posProp.SetValue(party, newPos);
-                                }
-                            }
-                            catch { }
+                            // Use proper CampaignVec2 positioning
+                            TeleportPartyToPosition(party, player.MapPositionX, player.MapPositionY);
+
+                            // Disable AI to prevent local movement
+                            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
                         }
                         else
                         {
@@ -325,6 +348,132 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 }
             }
             catch { }
+        }
+    }
+
+    /// <summary>
+    /// Creates a shadow party on the client to represent a remote player.
+    /// </summary>
+    private MobileParty? CreateClientShadowPartyForPlayer(string partyId, CoopPlayer player)
+    {
+        try
+        {
+            if (Campaign.Current == null) return null;
+
+            BannerBrosModule.LogMessage($"[Sync] Creating shadow party: {partyId} for {player.Name} at ({player.MapPositionX:F1}, {player.MapPositionY:F1})");
+
+            // Create a minimal party to represent the remote player
+            var party = MobileParty.CreateParty(partyId, null);
+
+            if (party == null)
+            {
+                BannerBrosModule.LogMessage($"[Sync] MobileParty.CreateParty returned null for {partyId}");
+                return null;
+            }
+
+            // Set position using CampaignVec2
+            TeleportPartyToPosition(party, player.MapPositionX, player.MapPositionY);
+
+            // Make visible on map
+            try { party.IsVisible = true; } catch { }
+
+            // Disable AI
+            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+
+            // Set party name if possible
+            try
+            {
+                var nameProp = party.GetType().GetProperty("Name");
+                if (nameProp?.CanWrite == true)
+                {
+                    nameProp.SetValue(party, new TaleWorlds.Localization.TextObject($"{player.Name}'s Warband"));
+                }
+            }
+            catch { }
+
+            var finalPos = party.GetPosition2D;
+            BannerBrosModule.LogMessage($"[Sync] Shadow party created: {partyId} at ({finalPos.x:F1}, {finalPos.y:F1})");
+            return party;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[Sync] Error creating shadow party: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Teleports a party to a specific position using CampaignVec2.
+    /// </summary>
+    private void TeleportPartyToPosition(MobileParty party, float x, float y)
+    {
+        if (party == null) return;
+
+        try
+        {
+            var vec2Pos = new Vec2(x, y);
+
+            // Try to create CampaignVec2 and set position
+            var campaignVec2Type = typeof(Campaign).Assembly.GetType("TaleWorlds.CampaignSystem.CampaignVec2");
+            if (campaignVec2Type != null)
+            {
+                object? campaignVec2 = null;
+
+                // Try (Vec2, Boolean) constructor first - common in Bannerlord
+                var ctor = campaignVec2Type.GetConstructor(new[] { typeof(Vec2), typeof(bool) });
+                if (ctor != null)
+                {
+                    campaignVec2 = ctor.Invoke(new object[] { vec2Pos, true }); // true = IsOnLand
+                }
+                else
+                {
+                    // Try (float, float) constructor
+                    ctor = campaignVec2Type.GetConstructor(new[] { typeof(float), typeof(float) });
+                    if (ctor != null)
+                    {
+                        campaignVec2 = ctor.Invoke(new object[] { x, y });
+                    }
+                }
+
+                if (campaignVec2 != null)
+                {
+                    // Try setting _position field
+                    var posField = typeof(MobileParty).GetField("_position",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                    if (posField != null && posField.FieldType == campaignVec2Type)
+                    {
+                        posField.SetValue(party, campaignVec2);
+                        return;
+                    }
+
+                    // Try Position2D property
+                    var posProp = typeof(MobileParty).GetProperty("Position2D");
+                    if (posProp?.CanWrite == true)
+                    {
+                        if (posProp.PropertyType == campaignVec2Type)
+                        {
+                            posProp.SetValue(party, campaignVec2);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Fallback: try Position2D with Vec2
+            try
+            {
+                var posProp = typeof(MobileParty).GetProperty("Position2D");
+                if (posProp?.CanWrite == true && posProp.PropertyType == typeof(Vec2))
+                {
+                    posProp.SetValue(party, vec2Pos);
+                }
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[Sync] TeleportPartyToPosition error: {ex.Message}");
         }
     }
 
@@ -774,6 +923,104 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"BroadcastFullWorldSync error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Broadcasts all mobile party positions to clients in a single batch packet.
+    /// This is more efficient than individual updates for large numbers of parties.
+    /// </summary>
+    private void BroadcastWorldPartyBatch()
+    {
+        try
+        {
+            var networkManager = NetworkManager.Instance;
+            if (networkManager == null || !networkManager.IsRunning) return;
+            if (Campaign.Current == null) return;
+
+            // Collect all party positions
+            var partyPositions = new List<PartyPositionData>();
+
+            foreach (var party in Campaign.Current.MobileParties.ToList())
+            {
+                try
+                {
+                    if (party == null) continue;
+                    if (string.IsNullOrEmpty(party.StringId)) continue;
+
+                    var pos = party.GetPosition2D;
+
+                    // Determine party type
+                    int partyType = 5; // Default: Other
+                    if (party.IsMainParty || party.StringId == "player_party")
+                        partyType = 4; // Player
+                    else if (party.IsLordParty)
+                        partyType = 0; // Lord
+                    else if (party.IsBandit)
+                        partyType = 1; // Bandit
+                    else if (party.IsCaravan)
+                        partyType = 2; // Caravan
+                    else if (party.IsVillager)
+                        partyType = 3; // Villager
+
+                    partyPositions.Add(new PartyPositionData
+                    {
+                        Id = party.StringId,
+                        X = pos.x,
+                        Y = pos.y,
+                        V = party.IsVisible,
+                        F = party.MapFaction?.StringId ?? "",
+                        N = party.Name?.ToString() ?? "",
+                        T = partyType,
+                        S = party.MemberRoster?.TotalManCount ?? 0
+                    });
+                }
+                catch
+                {
+                    // Skip party if there's an error
+                }
+            }
+
+            // Add shadow parties (client representatives on host)
+            var module = BannerBrosModule.Instance;
+            if (module != null)
+            {
+                foreach (var player in module.PlayerManager.Players.Values.ToList())
+                {
+                    if (player.IsHost) continue;
+                    if (string.IsNullOrEmpty(player.ShadowPartyId)) continue;
+
+                    // Shadow party should already be in the MobileParties list,
+                    // but ensure player position is up-to-date
+                    var existingEntry = partyPositions.FirstOrDefault(p => p.Id == player.ShadowPartyId);
+                    if (existingEntry != null)
+                    {
+                        existingEntry.X = player.MapPositionX;
+                        existingEntry.Y = player.MapPositionY;
+                        existingEntry.T = 4; // Mark as player type
+                        existingEntry.N = $"{player.Name}'s Party";
+                    }
+                }
+            }
+
+            var packet = new WorldPartyBatchPacket
+            {
+                CampaignTimeHours = (float)CampaignTime.Now.ToHours,
+                PartyCount = partyPositions.Count,
+                PartiesJson = JsonConvert.SerializeObject(partyPositions),
+                SequenceNumber = ++_batchSequenceNumber
+            };
+
+            // Send to all clients
+            networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
+
+            // Log every batch for debugging (can reduce later)
+            BannerBrosModule.LogMessage($"[WorldPartyBatch] HOST sent {partyPositions.Count} parties, seq={_batchSequenceNumber}");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"BroadcastWorldPartyBatch error: {ex.Message}");
+            BannerBrosModule.LogMessage($"Stack: {ex.StackTrace}");
         }
     }
 }

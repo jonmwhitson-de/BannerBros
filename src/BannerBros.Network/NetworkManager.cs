@@ -94,6 +94,9 @@ public class NetworkManager : INetEventListener
         _packetProcessor.SubscribeReusable<StateUpdatePacket, NetPeer>(_messageHandler.HandleStateUpdate);
         _packetProcessor.SubscribeReusable<StateSyncJoinRequestPacket, NetPeer>(_messageHandler.HandleStateSyncJoinRequest);
         _packetProcessor.SubscribeReusable<InitialStateSyncPacket, NetPeer>(_messageHandler.HandleInitialStateSync);
+
+        // World party batch sync (efficient sync of all parties)
+        _packetProcessor.SubscribeReusable<WorldPartyBatchPacket, NetPeer>(_messageHandler.HandleWorldPartyBatch);
     }
 
     public void StartHost(int port, int maxPlayers = 4)

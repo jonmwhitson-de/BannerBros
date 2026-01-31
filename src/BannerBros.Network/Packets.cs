@@ -515,3 +515,66 @@ public class InitialStateSyncPacket
     /// </summary>
     public string AssignedHeroId { get; set; } = "";
 }
+
+// ============================================================================
+// WORLD PARTY BATCH SYNC (Efficient sync of all parties from host to client)
+// ============================================================================
+
+/// <summary>
+/// Batch packet containing positions of all mobile parties on the map.
+/// Sent periodically from host to clients for efficient world state sync.
+/// </summary>
+public class WorldPartyBatchPacket
+{
+    /// <summary>
+    /// Campaign time when this snapshot was taken (hours).
+    /// </summary>
+    public float CampaignTimeHours { get; set; }
+
+    /// <summary>
+    /// Total number of parties in this batch.
+    /// </summary>
+    public int PartyCount { get; set; }
+
+    /// <summary>
+    /// Compressed party data as JSON array of PartyPositionData.
+    /// Format: [{"Id":"party_id","X":100.5,"Y":200.3,"V":true,"F":"faction_id"},...]
+    /// </summary>
+    public string PartiesJson { get; set; } = "";
+
+    /// <summary>
+    /// Sequence number for ordering/deduplication.
+    /// </summary>
+    public int SequenceNumber { get; set; }
+}
+
+/// <summary>
+/// Compact party position data for batch sync.
+/// Uses short property names to reduce packet size.
+/// </summary>
+public class PartyPositionData
+{
+    /// <summary>Party StringId</summary>
+    public string Id { get; set; } = "";
+
+    /// <summary>X position on map</summary>
+    public float X { get; set; }
+
+    /// <summary>Y position on map</summary>
+    public float Y { get; set; }
+
+    /// <summary>Is visible on map</summary>
+    public bool V { get; set; } = true;
+
+    /// <summary>Faction/Culture ID (for party icon)</summary>
+    public string F { get; set; } = "";
+
+    /// <summary>Party name (optional, for display)</summary>
+    public string N { get; set; } = "";
+
+    /// <summary>Party type: 0=Lord, 1=Bandit, 2=Caravan, 3=Villager, 4=Player, 5=Other</summary>
+    public int T { get; set; }
+
+    /// <summary>Troop count (for party size indicator)</summary>
+    public int S { get; set; }
+}

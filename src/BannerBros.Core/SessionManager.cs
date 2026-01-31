@@ -10,6 +10,7 @@ using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 using TaleWorlds.ObjectSystem;
 using BannerBros.Network;
 
@@ -2846,6 +2847,9 @@ public class SessionManager
 
         BannerBrosModule.LogMessage($"Received full state sync: {playerStates.Count} players");
 
+        var isHost = NetworkManager.Instance?.IsHost == true;
+        var localPlayerId = _playerManager.LocalPlayerId;
+
         // Update player states
         foreach (var playerState in playerStates)
         {
@@ -2859,6 +2863,13 @@ public class SessionManager
                 player.PartyId = playerState.PartyId;
                 player.ClanId = playerState.ClanId;
                 player.KingdomId = playerState.KingdomId;
+
+                // CLIENT: Update party positions for OTHER players (not ourselves)
+                if (!isHost && playerState.PlayerId != localPlayerId)
+                {
+                    BannerBrosModule.LogMessage($"[Sync] FullStateSync: Updating position for player {player.Name} (ID={playerState.PlayerId})");
+                    UpdateLocalPartyPosition(player);
+                }
             }
         }
 
@@ -2907,47 +2918,122 @@ public class SessionManager
     /// </summary>
     private void UpdateLocalPartyPosition(CoopPlayer player)
     {
-        if (string.IsNullOrEmpty(player.PartyId)) return;
-        if (Campaign.Current == null) return;
+        BannerBrosModule.LogMessage($"[Sync] UpdateLocalPartyPosition called for {player.Name}, PartyId={player.PartyId ?? "null"}, Pos=({player.MapPositionX:F1}, {player.MapPositionY:F1})");
+
+        if (string.IsNullOrEmpty(player.PartyId))
+        {
+            BannerBrosModule.LogMessage($"[Sync] UpdateLocalPartyPosition SKIPPED: PartyId is null/empty");
+            return;
+        }
+        if (Campaign.Current == null)
+        {
+            BannerBrosModule.LogMessage($"[Sync] UpdateLocalPartyPosition SKIPPED: Campaign.Current is null");
+            return;
+        }
 
         try
         {
+            // Handle party ID conflict - if the remote player's party ID matches our local main party,
+            // we need to use a different ID for the shadow party
+            var localMainPartyId = MobileParty.MainParty?.StringId;
+            string effectivePartyId = player.PartyId;
+            BannerBrosModule.LogMessage($"[Sync] localMainPartyId={localMainPartyId ?? "null"}, effectivePartyId={effectivePartyId}");
+
+            if (player.PartyId == localMainPartyId)
+            {
+                // This is a remote player whose party ID conflicts with ours
+                // Use a shadow ID
+                effectivePartyId = $"remote_{player.PartyId}";
+                BannerBrosModule.LogMessage($"[Sync] Client remapping {player.PartyId} to {effectivePartyId} for player {player.Name}");
+            }
+
             // Find the party in our local campaign
             var party = Campaign.Current.MobileParties
-                .FirstOrDefault(p => p.StringId == player.PartyId);
+                .FirstOrDefault(p => p.StringId == effectivePartyId);
 
-            if (party != null)
+            if (party == null)
             {
-                var newPos = new Vec2(player.MapPositionX, player.MapPositionY);
-
-                // Update position via reflection for API compatibility
-                try
+                // Party not found - need to create a shadow party for this remote player
+                BannerBrosModule.LogMessage($"[Sync] Creating shadow party {effectivePartyId} for player {player.Name} at ({player.MapPositionX:F1}, {player.MapPositionY:F1})");
+                party = CreateClientShadowParty(effectivePartyId, player.Name, player.MapPositionX, player.MapPositionY);
+                if (party == null)
                 {
-                    var posProp = party.GetType().GetProperty("Position2D");
-                    if (posProp?.CanWrite == true)
-                    {
-                        posProp.SetValue(party, newPos);
-                    }
+                    BannerBrosModule.LogMessage($"[Sync] Failed to create shadow party for {player.Name}");
+                    return;
                 }
-                catch { }
-
-                // Also update the party's visual position if needed
-                try
-                {
-                    party.Ai?.SetDoNotMakeNewDecisions(true);
-                }
-                catch { }
             }
-            else
+
+            // Use CampaignVec2 for proper position setting
+            TeleportPartyToPosition(party, player.MapPositionX, player.MapPositionY);
+
+            // Disable AI to prevent local movement
+            try
             {
-                // Party not found - might need to be created
-                // This happens if the party was created after we loaded the save
-                DebugLog.Log($"[Sync] Party {player.PartyId} not found for {player.Name}");
+                party.Ai?.SetDoNotMakeNewDecisions(true);
             }
+            catch { }
+
+            // Make sure the party is visible
+            try
+            {
+                party.IsVisible = true;
+            }
+            catch { }
         }
         catch (Exception ex)
         {
-            DebugLog.Log($"[Sync] UpdateLocalPartyPosition error: {ex.Message}");
+            BannerBrosModule.LogMessage($"[Sync] UpdateLocalPartyPosition error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates a shadow party on the client to represent a remote player.
+    /// </summary>
+    private MobileParty? CreateClientShadowParty(string partyId, string playerName, float x, float y)
+    {
+        try
+        {
+            if (Campaign.Current == null) return null;
+
+            BannerBrosModule.LogMessage($"[Sync] Creating client shadow party: {partyId} for {playerName}");
+
+            // Create a minimal party to represent the remote player
+            var party = MobileParty.CreateParty(partyId, null);
+
+            if (party == null)
+            {
+                BannerBrosModule.LogMessage($"[Sync] MobileParty.CreateParty returned null");
+                return null;
+            }
+
+            // Set position using CampaignVec2
+            TeleportPartyToPosition(party, x, y);
+
+            // Make visible on map
+            try { party.IsVisible = true; } catch { }
+
+            // Disable AI
+            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+
+            // Set party name if possible
+            try
+            {
+                var nameProp = party.GetType().GetProperty("Name");
+                if (nameProp?.CanWrite == true)
+                {
+                    nameProp.SetValue(party, new TextObject($"{playerName}'s Warband"));
+                }
+            }
+            catch { }
+
+            var finalPos = party.GetPosition2D;
+            BannerBrosModule.LogMessage($"[Sync] Client shadow party created: {partyId} at ({finalPos.x:F1}, {finalPos.y:F1})");
+            return party;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[Sync] Error creating client shadow party: {ex.Message}");
+            return null;
         }
     }
 
@@ -2979,6 +3065,10 @@ public class SessionManager
 
             // Use the TeleportPartyToPosition helper for reliable positioning
             TeleportPartyToPosition(party, player.MapPositionX, player.MapPositionY);
+
+            // CRITICAL: Broadcast this position to all clients so they can see the shadow party
+            // The StateSyncManager will send StateUpdatePacket to all connected peers
+            StateSync.StateSyncManager.Instance?.OnServerPartyPositionChanged(partyId, player.MapPositionX, player.MapPositionY);
         }
         catch (Exception ex)
         {

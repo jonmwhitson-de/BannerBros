@@ -51,6 +51,9 @@ public class MessageHandler
     public event Action<StateSyncJoinRequestPacket, int>? OnStateSyncJoinRequestReceived;
     public event Action<InitialStateSyncPacket>? OnInitialStateSyncReceived;
 
+    // World party batch sync (efficient sync of all parties)
+    public event Action<WorldPartyBatchPacket>? OnWorldPartyBatchReceived;
+
     public MessageHandler(NetworkManager networkManager)
     {
         _networkManager = networkManager;
@@ -358,5 +361,18 @@ public class MessageHandler
         Console.WriteLine($"[BannerBros.Network] Initial state sync received: {packet.AssignedPartyId}");
         if (_networkManager.IsHost) return; // Only clients receive this
         OnInitialStateSyncReceived?.Invoke(packet);
+    }
+
+    // ========================================================================
+    // World Party Batch Sync Handler
+    // ========================================================================
+
+    public void HandleWorldPartyBatch(WorldPartyBatchPacket packet, NetPeer peer)
+    {
+        // Only clients receive world party batch (from host)
+        if (_networkManager.IsHost) return;
+
+        Console.WriteLine($"[BannerBros.Network] World party batch received: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
+        OnWorldPartyBatchReceived?.Invoke(packet);
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem.Party;
@@ -103,7 +104,8 @@ public static class StateSyncPatches
     [HarmonyPatch(typeof(MobileParty), "Tick")]
     public static class MobilePartyTickPatch
     {
-        private static int _tickCounter;
+        // Per-party tick counters to ensure ALL synced parties get broadcast regularly
+        private static readonly Dictionary<string, int> _partyTickCounters = new();
         private static int _logCounter;
         private const int SyncEveryNTicks = 6; // ~10Hz at 60fps
 
@@ -113,32 +115,49 @@ public static class StateSyncPatches
 
             try
             {
-                // Only sync every N ticks to reduce network load
-                _tickCounter++;
-                if (_tickCounter < SyncEveryNTicks) return;
-                _tickCounter = 0;
-
                 var partyId = __instance.StringId;
                 if (string.IsNullOrEmpty(partyId)) return;
 
                 var stateSyncManager = StateSyncManager.Instance;
-                if (stateSyncManager?.IsPartySynced(partyId) == true)
-                {
-                    var pos = __instance.GetPosition2D;
-                    stateSyncManager.OnServerPartyPositionChanged(partyId, pos.x, pos.y);
+                if (stateSyncManager?.IsPartySynced(partyId) != true) return;
 
-                    // Log occasionally
-                    _logCounter++;
-                    if (_logCounter % 600 == 1) // Every ~60 seconds at 10Hz
-                    {
-                        BannerBrosModule.LogMessage($"[StateSyncPatch] Broadcasting {partyId} at ({pos.x:F1}, {pos.y:F1})");
-                    }
+                // Get or initialize per-party counter
+                if (!_partyTickCounters.TryGetValue(partyId, out int counter))
+                {
+                    counter = 0;
+                }
+
+                // Only sync every N ticks for THIS party
+                counter++;
+                if (counter < SyncEveryNTicks)
+                {
+                    _partyTickCounters[partyId] = counter;
+                    return;
+                }
+                _partyTickCounters[partyId] = 0;
+
+                var pos = __instance.GetPosition2D;
+                stateSyncManager.OnServerPartyPositionChanged(partyId, pos.x, pos.y);
+
+                // Log occasionally
+                _logCounter++;
+                if (_logCounter % 600 == 1) // Every ~60 seconds at 10Hz
+                {
+                    BannerBrosModule.LogMessage($"[StateSyncPatch] Broadcasting {partyId} at ({pos.x:F1}, {pos.y:F1})");
                 }
             }
             catch
             {
                 // Silently ignore
             }
+        }
+
+        /// <summary>
+        /// Clears the per-party tick counters. Call when session ends.
+        /// </summary>
+        public static void ClearCounters()
+        {
+            _partyTickCounters.Clear();
         }
     }
 }

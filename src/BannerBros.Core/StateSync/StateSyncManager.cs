@@ -4,9 +4,11 @@ using System.Linq;
 using System.Reflection;
 using BannerBros.Network;
 using LiteNetLib;
+using Newtonsoft.Json;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 
 namespace BannerBros.Core.StateSync;
 
@@ -62,9 +64,42 @@ public class StateSyncManager
         if (networkManager != null)
         {
             networkManager.Messages.OnStateUpdateReceived += HandleStateUpdateReceived;
+            networkManager.Messages.OnWorldPartyBatchReceived += HandleWorldPartyBatchReceived;
         }
 
         BannerBrosModule.LogMessage($"[StateSync] Initialized as {(isServer ? "SERVER" : "CLIENT")}");
+    }
+
+    /// <summary>
+    /// Hides all local NPC parties on the client.
+    /// The client should only see parties that the host broadcasts.
+    /// </summary>
+    public void HideAllLocalNpcParties()
+    {
+        if (_isServer) return;
+        if (Campaign.Current == null) return;
+
+        int hiddenCount = 0;
+        var localMainPartyId = MobileParty.MainParty?.StringId;
+
+        foreach (var party in Campaign.Current.MobileParties.ToList())
+        {
+            try
+            {
+                if (party == null) continue;
+
+                // Don't hide the local player's party
+                if (party.StringId == localMainPartyId) continue;
+                if (party.IsMainParty) continue;
+
+                // Hide all other parties
+                party.IsVisible = false;
+                hiddenCount++;
+            }
+            catch { }
+        }
+
+        BannerBrosModule.LogMessage($"[StateSync] Hidden {hiddenCount} local NPC parties (client will show host's parties only)");
     }
 
     /// <summary>
@@ -76,6 +111,7 @@ public class StateSyncManager
         if (networkManager != null)
         {
             networkManager.Messages.OnStateUpdateReceived -= HandleStateUpdateReceived;
+            networkManager.Messages.OnWorldPartyBatchReceived -= HandleWorldPartyBatchReceived;
         }
 
         _syncedPartyIds.Clear();
@@ -97,6 +133,8 @@ public class StateSyncManager
         _shadowParties.Clear();
 
         _initialized = false;
+        _localPartiesHidden = false;
+        _lastBatchSequence = -1;
 
         BannerBrosModule.LogMessage("[StateSync] Cleaned up");
     }
@@ -129,10 +167,25 @@ public class StateSyncManager
     /// Called when a party's position changes on the server.
     /// Broadcasts the change to all clients.
     /// </summary>
+    private static int _broadcastLogCounter = 0;
+
     public void OnServerPartyPositionChanged(string partyId, float x, float y)
     {
-        if (!_isServer || !_initialized) return;
-        if (!_syncedPartyIds.Contains(partyId)) return;
+        if (!_isServer)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] OnServerPartyPositionChanged SKIPPED: not server");
+            return;
+        }
+        if (!_initialized)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] OnServerPartyPositionChanged SKIPPED: not initialized");
+            return;
+        }
+        if (!_syncedPartyIds.Contains(partyId))
+        {
+            BannerBrosModule.LogMessage($"[StateSync] OnServerPartyPositionChanged SKIPPED: party {partyId} not synced");
+            return;
+        }
 
         var packet = new StateUpdatePacket
         {
@@ -144,6 +197,13 @@ public class StateSyncManager
         };
 
         BroadcastStateUpdate(packet);
+
+        // Log occasionally to avoid spam
+        _broadcastLogCounter++;
+        if (_broadcastLogCounter % 100 == 1)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] Broadcasting {partyId} pos ({x:F1}, {y:F1}) to clients");
+        }
     }
 
     /// <summary>
@@ -286,6 +346,8 @@ public class StateSyncManager
     {
         try
         {
+            BannerBrosModule.LogMessage($"[StateSync] ApplyStateUpdate: Type={(StateUpdateType)packet.UpdateType}, Entity={packet.EntityId}");
+
             switch ((StateUpdateType)packet.UpdateType)
             {
                 case StateUpdateType.PartyPosition:
@@ -298,12 +360,18 @@ public class StateSyncManager
 
                 case StateUpdateType.CampaignTime:
                     // Campaign time sync - for future use
+                    BannerBrosModule.LogMessage($"[StateSync] CampaignTime update received (not applied yet)");
+                    break;
+
+                default:
+                    BannerBrosModule.LogMessage($"[StateSync] Unknown update type: {packet.UpdateType}");
                     break;
             }
         }
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[StateSync] Error applying update: {ex.Message}");
+            BannerBrosModule.LogMessage($"[StateSync] Stack: {ex.StackTrace}");
         }
     }
 
@@ -311,9 +379,12 @@ public class StateSyncManager
 
     private void ApplyPartyPosition(string partyId, float x, float y)
     {
+        // Log entry for debugging
+        var localPartyId = MobileParty.MainParty?.StringId;
+        BannerBrosModule.LogMessage($"[StateSync] ApplyPartyPosition: partyId={partyId}, localPartyId={localPartyId ?? "null"}, pos=({x:F1}, {y:F1})");
+
         // Check if this is the local player's party - if so, we need to use a shadow ID
         // because both host and client have "player_party"
-        var localPartyId = MobileParty.MainParty?.StringId;
         string effectivePartyId = partyId;
 
         if (partyId == localPartyId)
@@ -482,6 +553,194 @@ public class StateSyncManager
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"[StateSync] SetPartyPosition error: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region World Party Batch Sync (Client-Side)
+
+    private int _lastBatchSequence = -1;
+    private static int _batchLogCounter = 0;
+    private bool _localPartiesHidden = false;
+
+    /// <summary>
+    /// Handle incoming world party batch from server.
+    /// </summary>
+    private void HandleWorldPartyBatchReceived(WorldPartyBatchPacket packet)
+    {
+        if (_isServer) return; // Only clients process this
+
+        BannerBrosModule.LogMessage($"[StateSync] CLIENT received WorldPartyBatch: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
+
+        // On first batch, hide all local NPC parties
+        if (!_localPartiesHidden && Campaign.Current != null)
+        {
+            HideAllLocalNpcParties();
+            _localPartiesHidden = true;
+        }
+
+        // Check for duplicate/out-of-order packets
+        if (packet.SequenceNumber <= _lastBatchSequence)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] Skipping old batch (seq {packet.SequenceNumber} <= {_lastBatchSequence})");
+            return;
+        }
+        _lastBatchSequence = packet.SequenceNumber;
+
+        try
+        {
+            ApplyWorldPartyBatch(packet);
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] HandleWorldPartyBatch error: {ex.Message}");
+            BannerBrosModule.LogMessage($"[StateSync] Stack: {ex.StackTrace}");
+        }
+    }
+
+    /// <summary>
+    /// Apply a batch of party positions to the local campaign.
+    /// Creates shadow parties for ALL host parties (client's local NPCs are hidden).
+    /// </summary>
+    private void ApplyWorldPartyBatch(WorldPartyBatchPacket packet)
+    {
+        if (Campaign.Current == null) return;
+
+        var parties = JsonConvert.DeserializeObject<List<PartyPositionData>>(packet.PartiesJson);
+        if (parties == null || parties.Count == 0)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] ApplyWorldPartyBatch: No parties in packet");
+            return;
+        }
+
+        var localMainPartyId = MobileParty.MainParty?.StringId;
+        int updated = 0;
+        int created = 0;
+        int skipped = 0;
+
+        foreach (var partyData in parties)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(partyData.Id)) continue;
+
+                // Skip if this is our own party (client's main party)
+                if (partyData.Id == localMainPartyId)
+                {
+                    // This is the host's main party OR our own party in the broadcast
+                    // If it's a player type (4) and matches our ID, it's the host - create shadow
+                    if (partyData.T == 4)
+                    {
+                        // Host's player_party - create as remote_player_party
+                        string remappedId = $"remote_{partyData.Id}";
+                        var shadowParty = GetOrCreateShadowParty(remappedId, partyData);
+                        if (shadowParty != null)
+                        {
+                            SetPartyPosition(shadowParty, partyData.X, partyData.Y);
+                            shadowParty.IsVisible = true;
+                            updated++;
+                        }
+                    }
+                    continue;
+                }
+
+                // For all other parties, create/update shadow
+                var party = GetOrCreateShadowParty(partyData.Id, partyData);
+                if (party != null)
+                {
+                    SetPartyPosition(party, partyData.X, partyData.Y);
+                    party.IsVisible = partyData.V;
+                    try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+                    updated++;
+                }
+                else
+                {
+                    skipped++;
+                }
+            }
+            catch
+            {
+                // Skip this party on error
+            }
+        }
+
+        // Log every batch for now (debugging)
+        _batchLogCounter++;
+        BannerBrosModule.LogMessage($"[StateSync] Applied batch #{_batchLogCounter}: {updated} updated, {skipped} skipped, {packet.PartyCount} total from host");
+    }
+
+    /// <summary>
+    /// Gets an existing shadow party or creates a new one.
+    /// </summary>
+    private MobileParty? GetOrCreateShadowParty(string partyId, PartyPositionData data)
+    {
+        // Check if we already have this shadow party
+        if (_shadowParties.TryGetValue(partyId, out var existingParty) && existingParty != null)
+        {
+            return existingParty;
+        }
+
+        // Check if it exists in the campaign (maybe created by another system)
+        var campaignParty = Campaign.Current?.MobileParties
+            .FirstOrDefault(p => p.StringId == partyId);
+        if (campaignParty != null)
+        {
+            _shadowParties[partyId] = campaignParty;
+            return campaignParty;
+        }
+
+        // Create new shadow party
+        return CreateShadowPartyFromData(partyId, data);
+    }
+
+    /// <summary>
+    /// Creates a shadow party from batch sync data.
+    /// </summary>
+    private MobileParty? CreateShadowPartyFromData(string partyId, PartyPositionData data)
+    {
+        try
+        {
+            if (Campaign.Current == null) return null;
+
+            BannerBrosModule.LogMessage($"[StateSync] Creating shadow party from batch: {partyId} at ({data.X:F1}, {data.Y:F1})");
+
+            var party = MobileParty.CreateParty(partyId, null);
+            if (party == null) return null;
+
+            // Set position
+            SetPartyPosition(party, data.X, data.Y);
+
+            // Set visibility
+            try { party.IsVisible = data.V; } catch { }
+
+            // Disable AI
+            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+
+            // Set name if provided
+            if (!string.IsNullOrEmpty(data.N))
+            {
+                try
+                {
+                    var nameProp = party.GetType().GetProperty("Name");
+                    if (nameProp?.CanWrite == true)
+                    {
+                        nameProp.SetValue(party, new TextObject(data.N));
+                    }
+                }
+                catch { }
+            }
+
+            // Track the shadow party
+            _shadowParties[partyId] = party;
+            _syncedPartyIds.Add(partyId);
+
+            return party;
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] CreateShadowPartyFromData error: {ex.Message}");
+            return null;
         }
     }
 
