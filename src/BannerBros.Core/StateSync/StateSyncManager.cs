@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using BannerBros.Network;
 using LiteNetLib;
 using TaleWorlds.CampaignSystem;
@@ -310,8 +311,21 @@ public class StateSyncManager
 
     private void ApplyPartyPosition(string partyId, float x, float y)
     {
+        // Check if this is the local player's party - if so, we need to use a shadow ID
+        // because both host and client have "player_party"
+        var localPartyId = MobileParty.MainParty?.StringId;
+        string effectivePartyId = partyId;
+
+        if (partyId == localPartyId)
+        {
+            // This update is for a remote player whose party has same ID as ours
+            // Use a shadow ID instead
+            effectivePartyId = $"remote_{partyId}";
+            BannerBrosModule.LogMessage($"[StateSync] Remapping {partyId} to {effectivePartyId} (conflicts with local party)");
+        }
+
         var party = Campaign.Current?.MobileParties
-            .FirstOrDefault(p => p.StringId == partyId);
+            .FirstOrDefault(p => p.StringId == effectivePartyId);
 
         bool fromShadow = false;
         bool created = false;
@@ -319,35 +333,27 @@ public class StateSyncManager
         // Check shadow parties if not found
         if (party == null)
         {
-            _shadowParties.TryGetValue(partyId, out party);
+            _shadowParties.TryGetValue(effectivePartyId, out party);
             fromShadow = party != null;
         }
 
         if (party == null)
         {
             // Party doesn't exist locally - create a shadow party
-            BannerBrosModule.LogMessage($"[StateSync] Creating shadow party for {partyId} at ({x:F1}, {y:F1})");
-            party = CreateShadowParty(partyId, x, y);
+            BannerBrosModule.LogMessage($"[StateSync] Creating shadow party for {effectivePartyId} at ({x:F1}, {y:F1})");
+            party = CreateShadowParty(effectivePartyId, x, y);
             created = true;
             if (party == null)
             {
-                BannerBrosModule.LogMessage($"[StateSync] FAILED to create shadow party for {partyId}");
+                BannerBrosModule.LogMessage($"[StateSync] FAILED to create shadow party for {effectivePartyId}");
                 return;
             }
         }
 
-        var newPos = new Vec2(x, y);
+        // Apply position using CampaignVec2
+        SetPartyPosition(party, x, y);
 
-        // Apply position via reflection for API compatibility
-        try
-        {
-            var posProp = party.GetType().GetProperty("Position2D");
-            if (posProp?.CanWrite == true)
-            {
-                posProp.SetValue(party, newPos);
-            }
-        }
-        catch { }
+        var newPos = new Vec2(x, y);
 
         // Disable AI to prevent local movement
         try
@@ -360,10 +366,11 @@ public class StateSyncManager
         _positionLogCounter++;
         if (created || _positionLogCounter % 100 == 1)
         {
-            BannerBrosModule.LogMessage($"[StateSync] Party {partyId} -> ({x:F1}, {y:F1}) [shadow:{fromShadow}, created:{created}]");
+            var remapped = effectivePartyId != partyId ? $" (remapped from {partyId})" : "";
+            BannerBrosModule.LogMessage($"[StateSync] Party {effectivePartyId}{remapped} -> ({x:F1}, {y:F1}) [shadow:{fromShadow}, created:{created}]");
         }
 
-        OnPartyPositionChanged?.Invoke(partyId, newPos);
+        OnPartyPositionChanged?.Invoke(effectivePartyId, newPos);
     }
 
     /// <summary>
@@ -386,17 +393,8 @@ public class StateSyncManager
                 return null;
             }
 
-            // Set position
-            var pos = new Vec2(x, y);
-            try
-            {
-                var posProp = party.GetType().GetProperty("Position2D");
-                if (posProp?.CanWrite == true)
-                {
-                    posProp.SetValue(party, pos);
-                }
-            }
-            catch { }
+            // Set position using CampaignVec2
+            SetPartyPosition(party, x, y);
 
             // Make visible on map
             try { party.IsVisible = true; } catch { }
@@ -408,7 +406,8 @@ public class StateSyncManager
             _shadowParties[partyId] = party;
             _syncedPartyIds.Add(partyId);
 
-            BannerBrosModule.LogMessage($"[StateSync] Shadow party created: {partyId}");
+            var finalPos = party.GetPosition2D;
+            BannerBrosModule.LogMessage($"[StateSync] Shadow party created: {partyId} at ({finalPos.x:F1}, {finalPos.y:F1})");
             return party;
         }
         catch (Exception ex)
@@ -422,6 +421,68 @@ public class StateSyncManager
     {
         // Apply party state changes
         OnPartyStateChanged?.Invoke(partyId, state);
+    }
+
+    /// <summary>
+    /// Sets a party's position using CampaignVec2 for API compatibility.
+    /// </summary>
+    private void SetPartyPosition(MobileParty party, float x, float y)
+    {
+        try
+        {
+            // Create CampaignVec2 using (Vec2, Boolean) constructor
+            var campaignVec2Type = typeof(Campaign).Assembly.GetType("TaleWorlds.CampaignSystem.CampaignVec2");
+            if (campaignVec2Type == null)
+            {
+                BannerBrosModule.LogMessage("[StateSync] CampaignVec2 type not found");
+                return;
+            }
+
+            var vec2Pos = new Vec2(x, y);
+            object? campaignVec2 = null;
+
+            // Try (Vec2, Boolean) constructor - the one that exists in Bannerlord
+            var ctor = campaignVec2Type.GetConstructor(new[] { typeof(Vec2), typeof(bool) });
+            if (ctor != null)
+            {
+                campaignVec2 = ctor.Invoke(new object[] { vec2Pos, true }); // true = IsOnLand
+            }
+
+            if (campaignVec2 == null)
+            {
+                BannerBrosModule.LogMessage("[StateSync] Failed to create CampaignVec2");
+                return;
+            }
+
+            // Try to set position via _position field
+            var posField = typeof(MobileParty).GetField("_position",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+
+            if (posField != null && posField.FieldType == campaignVec2Type)
+            {
+                posField.SetValue(party, campaignVec2);
+                return;
+            }
+
+            // Try Position2D property
+            var posProp = typeof(MobileParty).GetProperty("Position2D");
+            if (posProp?.CanWrite == true)
+            {
+                // Check if it expects CampaignVec2 or Vec2
+                if (posProp.PropertyType == campaignVec2Type)
+                {
+                    posProp.SetValue(party, campaignVec2);
+                }
+                else
+                {
+                    posProp.SetValue(party, vec2Pos);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[StateSync] SetPartyPosition error: {ex.Message}");
+        }
     }
 
     #endregion
