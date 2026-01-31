@@ -651,7 +651,7 @@ public class SessionManager
             {
                 player.HeroId = result.HeroId;
                 player.ClanId = result.ClanId;
-                player.PartyId = result.PartyId;
+                player.ShadowPartyId = result.PartyId;  // Store shadow party ID separately
                 player.MapPositionX = result.SpawnX;
                 player.MapPositionY = result.SpawnY;
                 player.State = PlayerState.OnMap;
@@ -2957,39 +2957,32 @@ public class SessionManager
     /// </summary>
     private void UpdateShadowPartyPosition(CoopPlayer player)
     {
-        if (string.IsNullOrEmpty(player.PartyId)) return;
+        // Use ShadowPartyId for non-host players (the server-side party representing them)
+        var partyId = player.ShadowPartyId;
+        if (string.IsNullOrEmpty(partyId)) return;
         if (Campaign.Current == null) return;
 
         try
         {
             // Find the shadow party
             var party = Campaign.Current.MobileParties
-                .FirstOrDefault(p => p.StringId == player.PartyId);
+                .FirstOrDefault(p => p.StringId == partyId);
 
-            if (party != null)
+            if (party == null)
             {
-                // Move shadow to client's reported position (relative to host's map)
-                // For now, we sync position but this won't perfectly match since
-                // client has a different campaign. This is MVP - positions approximate.
-                var newPos = new Vec2(player.MapPositionX, player.MapPositionY);
-
-                try
-                {
-                    var posProp = party.GetType().GetProperty("Position2D");
-                    if (posProp?.CanWrite == true)
-                    {
-                        posProp.SetValue(party, newPos);
-                    }
-                }
-                catch
-                {
-                    // Position sync failed - not critical
-                }
+                BannerBrosModule.LogMessage($"[Sync] Shadow party {partyId} not found for player {player.Name}");
+                return;
             }
+
+            // Move shadow to client's reported position
+            BannerBrosModule.LogMessage($"[Sync] Moving shadow party {partyId} to ({player.MapPositionX:F1}, {player.MapPositionY:F1})");
+
+            // Use the TeleportPartyToPosition helper for reliable positioning
+            TeleportPartyToPosition(party, player.MapPositionX, player.MapPositionY);
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore errors in shadow position sync
+            BannerBrosModule.LogMessage($"[Sync] Error updating shadow position: {ex.Message}");
         }
     }
 

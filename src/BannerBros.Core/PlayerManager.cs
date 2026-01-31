@@ -122,7 +122,8 @@ public class CoopPlayer
     public int NetworkId { get; set; }
     public string Name { get; set; } = "";
     public string? HeroId { get; set; }
-    public string? PartyId { get; set; }
+    public string? PartyId { get; set; }  // Client's local party ID
+    public string? ShadowPartyId { get; set; }  // Server-side shadow party ID (for non-host players)
     public string? ClanId { get; set; }
     public string? KingdomId { get; set; }
 
