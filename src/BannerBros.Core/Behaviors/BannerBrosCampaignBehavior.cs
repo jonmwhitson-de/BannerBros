@@ -927,8 +927,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
     }
 
     /// <summary>
-    /// Broadcasts all mobile party positions to clients in a single batch packet.
-    /// This is more efficient than individual updates for large numbers of parties.
+    /// Broadcasts all mobile party positions to clients in chunked batch packets.
+    /// Chunks are needed because the full list exceeds network packet size limits (~32KB).
     /// </summary>
     private void BroadcastWorldPartyBatch()
     {
@@ -1003,19 +1003,39 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                 }
             }
 
-            var packet = new WorldPartyBatchPacket
+            // Chunk the parties to stay under 32KB packet limit
+            // ~200 parties per chunk is safe (~100-150 bytes per party serialized)
+            const int ChunkSize = 200;
+            int totalParties = partyPositions.Count;
+            int totalChunks = (totalParties + ChunkSize - 1) / ChunkSize; // Ceiling division
+
+            _batchSequenceNumber++;
+            float campaignTime = (float)CampaignTime.Now.ToHours;
+
+            for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++)
             {
-                CampaignTimeHours = (float)CampaignTime.Now.ToHours,
-                PartyCount = partyPositions.Count,
-                PartiesJson = JsonConvert.SerializeObject(partyPositions),
-                SequenceNumber = ++_batchSequenceNumber
-            };
+                var chunkParties = partyPositions
+                    .Skip(chunkIndex * ChunkSize)
+                    .Take(ChunkSize)
+                    .ToList();
 
-            // Send to all clients
-            networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
+                var packet = new WorldPartyBatchPacket
+                {
+                    CampaignTimeHours = campaignTime,
+                    PartyCount = chunkParties.Count,
+                    PartiesJson = JsonConvert.SerializeObject(chunkParties),
+                    SequenceNumber = _batchSequenceNumber,
+                    ChunkIndex = chunkIndex,
+                    TotalChunks = totalChunks,
+                    TotalParties = totalParties
+                };
 
-            // Log every batch for debugging (can reduce later)
-            BannerBrosModule.LogMessage($"[WorldPartyBatch] HOST sent {partyPositions.Count} parties, seq={_batchSequenceNumber}");
+                // Send to all clients
+                networkManager.Send(packet, DeliveryMethod.ReliableOrdered);
+            }
+
+            // Log once per batch (not per chunk)
+            BannerBrosModule.LogMessage($"[WorldPartyBatch] HOST sent {totalParties} parties in {totalChunks} chunks, seq={_batchSequenceNumber}");
         }
         catch (Exception ex)
         {

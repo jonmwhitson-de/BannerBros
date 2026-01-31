@@ -532,7 +532,7 @@ public class WorldPartyBatchPacket
     public float CampaignTimeHours { get; set; }
 
     /// <summary>
-    /// Total number of parties in this batch.
+    /// Total number of parties in this chunk (not total overall).
     /// </summary>
     public int PartyCount { get; set; }
 
@@ -546,6 +546,21 @@ public class WorldPartyBatchPacket
     /// Sequence number for ordering/deduplication.
     /// </summary>
     public int SequenceNumber { get; set; }
+
+    /// <summary>
+    /// Chunk index within this batch (0-based).
+    /// </summary>
+    public int ChunkIndex { get; set; }
+
+    /// <summary>
+    /// Total number of chunks in this batch.
+    /// </summary>
+    public int TotalChunks { get; set; }
+
+    /// <summary>
+    /// Total number of parties across all chunks.
+    /// </summary>
+    public int TotalParties { get; set; }
 }
 
 /// <summary>

@@ -573,6 +573,7 @@ public class StateSyncManager
 
     /// <summary>
     /// Handle incoming world party batch from server.
+    /// Packets may arrive in multiple chunks to stay under network size limits.
     /// </summary>
     private void HandleWorldPartyBatchReceived(WorldPartyBatchPacket packet)
     {
@@ -580,12 +581,20 @@ public class StateSyncManager
         {
             if (_isServer) return; // Only clients process this
 
-            BannerBrosModule.LogMessage($"[StateSync] CLIENT received WorldPartyBatch: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
-
-            // Check for duplicate/out-of-order packets
-            if (packet.SequenceNumber <= _lastBatchSequence)
+            // Log chunk info
+            if (packet.TotalChunks > 1)
             {
-                BannerBrosModule.LogMessage($"[StateSync] Skipping old batch (seq {packet.SequenceNumber} <= {_lastBatchSequence})");
+                BannerBrosModule.LogMessage($"[StateSync] CLIENT received chunk {packet.ChunkIndex + 1}/{packet.TotalChunks} ({packet.PartyCount} parties), seq={packet.SequenceNumber}");
+            }
+            else
+            {
+                BannerBrosModule.LogMessage($"[StateSync] CLIENT received WorldPartyBatch: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
+            }
+
+            // Check for old sequence (but allow same sequence for different chunks)
+            if (packet.SequenceNumber < _lastBatchSequence)
+            {
+                BannerBrosModule.LogMessage($"[StateSync] Skipping old batch (seq {packet.SequenceNumber} < {_lastBatchSequence})");
                 return;
             }
             _lastBatchSequence = packet.SequenceNumber;

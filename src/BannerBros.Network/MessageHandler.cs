@@ -372,7 +372,14 @@ public class MessageHandler
         // Only clients receive world party batch (from host)
         if (_networkManager.IsHost) return;
 
-        Console.WriteLine($"[BannerBros.Network] World party batch received: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
+        if (packet.TotalChunks > 1)
+        {
+            Console.WriteLine($"[BannerBros.Network] World party batch chunk {packet.ChunkIndex + 1}/{packet.TotalChunks}: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
+        }
+        else
+        {
+            Console.WriteLine($"[BannerBros.Network] World party batch received: {packet.PartyCount} parties, seq={packet.SequenceNumber}");
+        }
         OnWorldPartyBatchReceived?.Invoke(packet);
     }
 }
