@@ -385,6 +385,14 @@ public class StateSyncManager
         var localPartyId = MobileParty.MainParty?.StringId;
         BannerBrosModule.LogMessage($"[StateSync] ApplyPartyPosition: partyId={partyId}, localPartyId={localPartyId ?? "null"}, pos=({x:F1}, {y:F1})");
 
+        // Skip coop_party_ prefixed IDs - these are client representation parties on the host
+        // Clients don't need to create shadows for these (they represent the client themselves)
+        if (partyId.StartsWith("coop_party_"))
+        {
+            BannerBrosModule.LogMessage($"[StateSync] Skipping coop_party update (client representation): {partyId}");
+            return;
+        }
+
         // Check if this is the local player's party - if so, we need to use a shadow ID
         // because both host and client have "player_party"
         string effectivePartyId = partyId;
