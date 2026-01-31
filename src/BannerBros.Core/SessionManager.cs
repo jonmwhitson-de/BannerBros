@@ -2931,6 +2931,14 @@ public class SessionManager
             return;
         }
 
+        // Skip coop_party_ prefixed IDs - these are client representation parties on the host
+        // Clients don't need to create shadows for these (they represent the client's own party)
+        if (player.PartyId.StartsWith("coop_party_"))
+        {
+            BannerBrosModule.LogMessage($"[Sync] UpdateLocalPartyPosition SKIPPED: coop_party_ ID (client representation): {player.PartyId}");
+            return;
+        }
+
         try
         {
             // Handle party ID conflict - if the remote player's party ID matches our local main party,
