@@ -38,6 +38,12 @@ public class BannerBrosModule : MBSubModuleBase
     /// </summary>
     public ExportedCharacter? PendingExportedCharacter { get; set; }
 
+    /// <summary>
+    /// Save file name received from host, pending to be loaded.
+    /// When set, the client should load this save file to sync with host.
+    /// </summary>
+    public string? PendingCoopSaveToLoad { get; set; }
+
     public bool IsHost { get; private set; }
     public bool IsConnected { get; private set; }
     public SessionState SessionState => SessionManager?.State ?? SessionState.Disconnected;

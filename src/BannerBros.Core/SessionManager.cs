@@ -64,6 +64,13 @@ public class SessionManager
         networkManager.Messages.OnSessionEventReceived += HandleSessionEvent;
         networkManager.Messages.OnClientCampaignReadyReceived += HandleClientCampaignReady;
 
+        // Save file transfer events
+        networkManager.Messages.OnSaveFileRequestReceived += HandleSaveFileRequest;
+        networkManager.Messages.OnSaveFileStartReceived += HandleSaveFileStart;
+        networkManager.Messages.OnSaveFileChunkReceived += HandleSaveFileChunk;
+        networkManager.Messages.OnSaveFileCompleteReceived += HandleSaveFileComplete;
+        networkManager.Messages.OnSaveFileReceivedReceived += HandleSaveFileReceived;
+
         networkManager.PeerConnected += OnPeerConnected;
         networkManager.PeerDisconnected += OnPeerDisconnected;
         networkManager.ConnectionRejected += OnConnectionRejected;
@@ -89,6 +96,13 @@ public class SessionManager
         networkManager.Messages.OnPlayerStateReceived -= HandlePlayerStateUpdate;
         networkManager.Messages.OnSessionEventReceived -= HandleSessionEvent;
         networkManager.Messages.OnClientCampaignReadyReceived -= HandleClientCampaignReady;
+
+        // Save file transfer events
+        networkManager.Messages.OnSaveFileRequestReceived -= HandleSaveFileRequest;
+        networkManager.Messages.OnSaveFileStartReceived -= HandleSaveFileStart;
+        networkManager.Messages.OnSaveFileChunkReceived -= HandleSaveFileChunk;
+        networkManager.Messages.OnSaveFileCompleteReceived -= HandleSaveFileComplete;
+        networkManager.Messages.OnSaveFileReceivedReceived -= HandleSaveFileReceived;
 
         networkManager.PeerConnected -= OnPeerConnected;
         networkManager.PeerDisconnected -= OnPeerDisconnected;
@@ -3168,6 +3182,313 @@ public class SessionManager
             IsInBattle = player.CurrentBattleId != null,
             BattleId = player.CurrentBattleId ?? ""
         };
+    }
+
+    #endregion
+
+    #region Save File Transfer
+
+    // Helper property to check if we're the host
+    private bool IsHost => NetworkManager.Instance?.IsHost == true;
+
+    // Save file transfer state
+    private Dictionary<int, MemoryStream> _pendingSaveTransfers = new();
+    private MemoryStream? _receivingSaveFile;
+    private string _receivingSaveFileName = "";
+    private int _expectedChunks = 0;
+    private int _receivedChunks = 0;
+    private const int SaveChunkSize = 16384; // 16KB chunks
+
+    /// <summary>
+    /// Gets the path to Bannerlord's save folder.
+    /// </summary>
+    private static string GetSaveFolder()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "Mount and Blade II Bannerlord",
+            "Game Saves",
+            "Native"
+        );
+    }
+
+    /// <summary>
+    /// HOST: Handle request for save file from a client.
+    /// </summary>
+    private void HandleSaveFileRequest(SaveFileRequestPacket packet, int peerId)
+    {
+        if (!IsHost) return;
+
+        BannerBrosModule.LogMessage($"[SaveTransfer] Client {packet.PlayerId} requested save file");
+
+        try
+        {
+            // First, save the current game
+            var saveName = $"coop_sync_{DateTime.Now:yyyyMMdd_HHmmss}";
+            BannerBrosModule.LogMessage($"[SaveTransfer] Saving game as: {saveName}");
+
+            // Use Bannerlord's save system
+            Campaign.Current?.SaveHandler?.SaveAs(saveName);
+
+            // Wait a moment for save to complete
+            System.Threading.Thread.Sleep(500);
+
+            // Find the save file
+            var saveFolder = GetSaveFolder();
+            var saveFile = Path.Combine(saveFolder, saveName + ".sav");
+
+            if (!File.Exists(saveFile))
+            {
+                BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Save file not found: {saveFile}");
+                return;
+            }
+
+            // Read the save file
+            var saveData = File.ReadAllBytes(saveFile);
+            BannerBrosModule.LogMessage($"[SaveTransfer] Save file size: {saveData.Length} bytes");
+
+            // Calculate chunks
+            var totalChunks = (int)Math.Ceiling((double)saveData.Length / SaveChunkSize);
+
+            // Send start packet
+            var startPacket = new SaveFileStartPacket
+            {
+                SaveFileName = saveName,
+                TotalSize = saveData.Length,
+                TotalChunks = totalChunks,
+                SaveChecksum = ComputeChecksum(saveData)
+            };
+            NetworkManager.Instance?.SendTo(peerId, startPacket);
+            BannerBrosModule.LogMessage($"[SaveTransfer] Sent start packet: {totalChunks} chunks");
+
+            // Send chunks
+            for (int i = 0; i < totalChunks; i++)
+            {
+                var offset = i * SaveChunkSize;
+                var length = Math.Min(SaveChunkSize, saveData.Length - offset);
+                var chunkData = new byte[length];
+                Array.Copy(saveData, offset, chunkData, 0, length);
+
+                var chunkPacket = new SaveFileChunkPacket
+                {
+                    ChunkIndex = i,
+                    TotalChunks = totalChunks,
+                    Data = chunkData,
+                    DataLength = length
+                };
+                NetworkManager.Instance?.SendTo(peerId, chunkPacket);
+
+                // Small delay to prevent network congestion
+                if (i % 10 == 0)
+                {
+                    System.Threading.Thread.Sleep(10);
+                }
+            }
+
+            // Send complete packet
+            var completePacket = new SaveFileCompletePacket
+            {
+                SaveFileName = saveName,
+                SaveChecksum = ComputeChecksum(saveData)
+            };
+            NetworkManager.Instance?.SendTo(peerId, completePacket);
+            BannerBrosModule.LogMessage($"[SaveTransfer] Save file transfer complete");
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] ERROR sending save: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// CLIENT: Handle start of save file transfer.
+    /// </summary>
+    private void HandleSaveFileStart(SaveFileStartPacket packet)
+    {
+        if (IsHost) return;
+
+        BannerBrosModule.LogMessage($"[SaveTransfer] Receiving save file: {packet.SaveFileName} ({packet.TotalSize} bytes, {packet.TotalChunks} chunks)");
+
+        _receivingSaveFile = new MemoryStream();
+        _receivingSaveFileName = packet.SaveFileName;
+        _expectedChunks = packet.TotalChunks;
+        _receivedChunks = 0;
+    }
+
+    /// <summary>
+    /// CLIENT: Handle a chunk of save file data.
+    /// </summary>
+    private void HandleSaveFileChunk(SaveFileChunkPacket packet)
+    {
+        if (IsHost) return;
+        if (_receivingSaveFile == null) return;
+
+        _receivingSaveFile.Write(packet.Data, 0, packet.DataLength);
+        _receivedChunks++;
+
+        if (_receivedChunks % 20 == 0)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Received chunk {_receivedChunks}/{_expectedChunks}");
+        }
+    }
+
+    /// <summary>
+    /// CLIENT: Handle completion of save file transfer.
+    /// </summary>
+    private void HandleSaveFileComplete(SaveFileCompletePacket packet)
+    {
+        if (IsHost) return;
+        if (_receivingSaveFile == null) return;
+
+        try
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Transfer complete, writing to disk...");
+
+            // Write save file to disk
+            var saveFolder = GetSaveFolder();
+            if (!Directory.Exists(saveFolder))
+            {
+                Directory.CreateDirectory(saveFolder);
+            }
+
+            var savePath = Path.Combine(saveFolder, _receivingSaveFileName + ".sav");
+            var saveData = _receivingSaveFile.ToArray();
+            File.WriteAllBytes(savePath, saveData);
+
+            BannerBrosModule.LogMessage($"[SaveTransfer] Save file written: {savePath}");
+
+            // Verify checksum
+            var checksum = ComputeChecksum(saveData);
+            if (checksum != packet.SaveChecksum)
+            {
+                BannerBrosModule.LogMessage($"[SaveTransfer] WARNING: Checksum mismatch!");
+            }
+
+            // Notify host that we received the file
+            var receivedPacket = new SaveFileReceivedPacket
+            {
+                PlayerId = _playerManager.LocalPlayerId,
+                Success = true
+            };
+            NetworkManager.Instance?.SendToHost(receivedPacket);
+
+            // Clean up
+            _receivingSaveFile.Dispose();
+            _receivingSaveFile = null;
+
+            // Now load the save file
+            BannerBrosModule.LogMessage($"[SaveTransfer] Loading save file: {_receivingSaveFileName}");
+            LoadReceivedSaveFile(_receivingSaveFileName);
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: {ex.Message}");
+
+            var receivedPacket = new SaveFileReceivedPacket
+            {
+                PlayerId = _playerManager.LocalPlayerId,
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+            NetworkManager.Instance?.SendToHost(receivedPacket);
+        }
+    }
+
+    /// <summary>
+    /// HOST: Handle confirmation that client received save file.
+    /// </summary>
+    private void HandleSaveFileReceived(SaveFileReceivedPacket packet, int peerId)
+    {
+        if (!IsHost) return;
+
+        if (packet.Success)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Client {packet.PlayerId} successfully received save file");
+        }
+        else
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Client {packet.PlayerId} failed to receive: {packet.ErrorMessage}");
+        }
+    }
+
+    /// <summary>
+    /// CLIENT: Handle a received save file and show instructions to user.
+    /// </summary>
+    private void LoadReceivedSaveFile(string saveName)
+    {
+        try
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Save file ready: {saveName}");
+
+            var saveFolder = GetSaveFolder();
+            var savePath = Path.Combine(saveFolder, saveName + ".sav");
+
+            if (!File.Exists(savePath))
+            {
+                BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Save file not found: {savePath}");
+                return;
+            }
+
+            // Store the save name and connection info for reconnection
+            var module = BannerBrosModule.Instance!;
+            module.PendingCoopSaveToLoad = saveName;
+
+            // Store connection info for reconnection
+            var lastAddress = module.Config.LastServerAddress;
+
+            BannerBrosModule.LogMessage($"[SaveTransfer] Save ready to load: {saveName}");
+
+            // Show dialog with clear instructions
+            var inquiry = new InquiryData(
+                "World Sync Complete!",
+                $"The host's save file has been downloaded:\n'{saveName}'\n\n" +
+                "To complete the sync:\n\n" +
+                "1. Press ESC and click 'Exit to Main Menu'\n" +
+                "2. Click 'Load Game'\n" +
+                $"3. Select '{saveName}'\n" +
+                "4. Once loaded, press K to rejoin co-op\n\n" +
+                $"Server: {lastAddress}\n\n" +
+                "You will see all NPCs, settlements, and world state from the host!",
+                true,
+                false,
+                "Got it!",
+                "",
+                null,
+                null
+            );
+
+            InformationManager.ShowInquiry(inquiry, true);
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] Load error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Computes a simple checksum for data verification.
+    /// </summary>
+    private static string ComputeChecksum(byte[] data)
+    {
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        var hash = md5.ComputeHash(data);
+        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// CLIENT: Request save file from host.
+    /// </summary>
+    public void RequestSaveFileFromHost()
+    {
+        if (IsHost) return;
+
+        BannerBrosModule.LogMessage($"[SaveTransfer] Requesting save file from host...");
+
+        var packet = new SaveFileRequestPacket
+        {
+            PlayerId = _playerManager.LocalPlayerId
+        };
+        NetworkManager.Instance?.SendToHost(packet);
     }
 
     #endregion

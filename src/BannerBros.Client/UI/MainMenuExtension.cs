@@ -660,4 +660,67 @@ public static class CoopSessionMenu
 
         InformationManager.ShowInquiry(inquiry, true);
     }
+
+    /// <summary>
+    /// Shows the world sync option for clients to get host's save file.
+    /// This ensures all NPCs, settlements, and world state match.
+    /// </summary>
+    public static void ShowWorldSyncDialog()
+    {
+        var module = BannerBrosModule.Instance;
+        if (module?.IsConnected != true)
+        {
+            BannerBrosModule.LogMessage("Not connected to a co-op session");
+            return;
+        }
+
+        if (module.IsHost)
+        {
+            BannerBrosModule.LogMessage("Host already has authoritative world state");
+            return;
+        }
+
+        var inquiry = new InquiryData(
+            "Sync World State",
+            "This will download the host's save file to sync all NPCs, settlements, and world state.\n\n" +
+            "After download, you will need to:\n" +
+            "1. Exit to main menu\n" +
+            "2. Load the 'coop_sync_*' save file\n" +
+            "3. Reconnect to the host\n\n" +
+            "Your visibility with other players will be preserved!",
+            true,
+            true,
+            "Start Sync",
+            "Cancel",
+            OnWorldSyncConfirmed,
+            null
+        );
+
+        InformationManager.ShowInquiry(inquiry, true);
+    }
+
+    private static void OnWorldSyncConfirmed()
+    {
+        var module = BannerBrosModule.Instance;
+        if (module?.SessionManager == null) return;
+
+        BannerBrosModule.LogMessage("Requesting world sync from host...");
+        module.SessionManager.RequestSaveFileFromHost();
+
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Downloading...",
+                "Downloading save file from host.\n\n" +
+                "This may take a moment depending on the save size.\n" +
+                "You'll see a notification when complete.",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
+    }
 }
