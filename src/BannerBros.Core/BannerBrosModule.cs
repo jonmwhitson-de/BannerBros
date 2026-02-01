@@ -290,6 +290,55 @@ public class BannerBrosModule : MBSubModuleBase
         LogMessage($"Joining session at {address}:{port}");
     }
 
+    /// <summary>
+    /// Flag indicating we're connected just to download the save file (from main menu).
+    /// </summary>
+    public bool IsDownloadingSave { get; private set; }
+
+    /// <summary>
+    /// Connect to host from main menu to download save file.
+    /// No campaign is running - we just get the save, then disconnect.
+    /// </summary>
+    public void ConnectForSaveDownload(string address, int port = 7777)
+    {
+        LogMessage($"ConnectForSaveDownload: Connecting to {address}:{port}...");
+
+        if (NetworkManager.Instance == null)
+        {
+            LogMessage("Error: NetworkManager not initialized!");
+            return;
+        }
+
+        IsHost = false;
+        IsDownloadingSave = true;
+
+        // Initialize session manager for save transfer handling
+        SessionManager.Initialize();
+
+        // Connect to host
+        NetworkManager.Instance.Connect(address, port);
+        IsConnected = true;
+
+        LogMessage("ConnectForSaveDownload: Connected, will request save file...");
+    }
+
+    /// <summary>
+    /// Called when save file download is complete. Disconnects and prepares for manual load.
+    /// </summary>
+    public void OnSaveDownloadComplete(string saveName)
+    {
+        LogMessage($"Save download complete: {saveName}");
+
+        // Store for auto-reconnect after load
+        PendingCoopSaveToLoad = saveName;
+        IsDownloadingSave = false;
+
+        // Disconnect - client will reconnect after loading the save
+        Disconnect();
+
+        LogMessage("Disconnected. Load the save file to continue.");
+    }
+
     private void SendDebugLogToServer(string message, int playerId, string playerName)
     {
         if (IsHost || NetworkManager.Instance == null) return;

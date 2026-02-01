@@ -111,23 +111,72 @@ public static class MainMenuExtension
 
     public static void ShowJoinDialog()
     {
-        // State sync architecture: Client must be in their own campaign first
-        var inquiry = new InquiryData(
-            "Join Co-op Session",
-            "To join a co-op session:\n\n" +
-            "1. Start a Campaign (Sandbox or Story)\n" +
-            "2. Create your character normally\n" +
-            "3. When you enter the map, you'll be asked to join\n\n" +
-            "Your party will sync with the host's world.\n" +
-            "Both players will see each other on the map!",
-            true,
-            false,
-            "OK",
-            "",
-            null,
-            null
+        // Direct join from main menu - enter IP, download save, then load it
+        InformationManager.ShowTextInquiry(
+            new TextInquiryData(
+                "Join Co-op Session",
+                "Enter the host's IP address:\n\nExample: 192.168.1.100 or 192.168.1.100:7777",
+                true,
+                true,
+                "Connect",
+                "Cancel",
+                OnMainMenuJoinAddressEntered,
+                null,
+                false,
+                text => new Tuple<bool, string>(!string.IsNullOrWhiteSpace(text), "Address cannot be empty"),
+                "",
+                BannerBrosModule.Instance?.Config.LastServerAddress ?? ""
+            )
         );
-        InformationManager.ShowInquiry(inquiry, true);
+    }
+
+    private static void OnMainMenuJoinAddressEntered(string address)
+    {
+        // Parse address
+        var parts = address.Split(':');
+        _pendingServerAddress = parts[0];
+        _pendingServerPort = parts.Length > 1 && int.TryParse(parts[1], out var p)
+            ? p
+            : BannerBrosModule.Instance?.Config.DefaultPort ?? 7777;
+
+        // Save for later reconnection
+        var module = BannerBrosModule.Instance;
+        if (module != null)
+        {
+            module.Config.LastServerAddress = address;
+            module.Config.Save();
+        }
+
+        BannerBrosModule.LogMessage($"Connecting to {_pendingServerAddress}:{_pendingServerPort} from main menu...");
+
+        // Connect to download save file
+        ConnectFromMainMenuForSaveDownload();
+    }
+
+    private static void ConnectFromMainMenuForSaveDownload()
+    {
+        var module = BannerBrosModule.Instance;
+        if (module == null) return;
+
+        // Initialize network for save download (no campaign yet)
+        module.ConnectForSaveDownload(_pendingServerAddress, _pendingServerPort);
+
+        // Show connecting dialog
+        InformationManager.ShowInquiry(
+            new InquiryData(
+                "Connecting...",
+                $"Connecting to {_pendingServerAddress}:{_pendingServerPort}...\n\n" +
+                "The host's save file will be downloaded.\n" +
+                "You'll then load it to join the game.",
+                true,
+                false,
+                "OK",
+                "",
+                null,
+                null
+            ),
+            true
+        );
     }
 
     /// <summary>

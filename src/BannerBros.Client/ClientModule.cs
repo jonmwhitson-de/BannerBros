@@ -200,22 +200,7 @@ public class ClientModule : MBSubModuleBase
     private void HandleCoopInput()
     {
         var module = BannerBrosModule.Instance;
-
-        // K - Join/Rejoin co-op session (works when not connected, in campaign)
-        if (Input.IsKeyPressed(InputKey.K))
-        {
-            if (module?.IsConnected != true && Campaign.Current != null)
-            {
-                // Not connected but in a campaign - show join dialog
-                MainMenuExtension.ShowInGameJoinDialog();
-            }
-        }
-
-        // Must be connected for remaining shortcuts
         if (module?.IsConnected != true) return;
-
-        // Battle joining is handled through the game's normal encounter system
-        // Players approach battles on the map like they would NPC battles
 
         // T - Cycle time speed (host only)
         if (Input.IsKeyPressed(InputKey.T))
@@ -227,15 +212,6 @@ public class ClientModule : MBSubModuleBase
         if (Input.IsKeyPressed(InputKey.P))
         {
             CoopSessionMenu.ShowPlayerList();
-        }
-
-        // W - World sync (client only) - download host's save file
-        if (Input.IsKeyPressed(InputKey.W))
-        {
-            if (!module.IsHost)
-            {
-                CoopSessionMenu.ShowWorldSyncDialog();
-            }
         }
     }
 

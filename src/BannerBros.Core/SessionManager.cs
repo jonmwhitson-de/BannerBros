@@ -2729,10 +2729,17 @@ public class SessionManager
             }
         }
 
-        // State Sync Architecture: No save file transfer needed
-        // Client runs their own campaign, state is synchronized via network packets
         BannerBrosModule.LogMessage("Player joined the game");
         SetState(SessionState.Connected);
+
+        // Check if we're joining from main menu to download save
+        var module = BannerBrosModule.Instance;
+        if (module?.IsDownloadingSave == true)
+        {
+            BannerBrosModule.LogMessage("Downloading save mode - requesting save file from host...");
+            RequestSaveFileFromHost();
+            return;
+        }
 
         // If client is already in a campaign, notify the server
         if (Campaign.Current != null)
@@ -3429,35 +3436,56 @@ public class SessionManager
                 return;
             }
 
-            // Store the save name and connection info for reconnection
             var module = BannerBrosModule.Instance!;
-            module.PendingCoopSaveToLoad = saveName;
-
-            // Store connection info for reconnection
             var lastAddress = module.Config.LastServerAddress;
 
             BannerBrosModule.LogMessage($"[SaveTransfer] Save ready to load: {saveName}");
 
-            // Show dialog with clear instructions
-            var inquiry = new InquiryData(
-                "World Sync Complete!",
-                $"The host's save file has been downloaded:\n'{saveName}'\n\n" +
-                "To complete the sync:\n\n" +
-                "1. Press ESC and click 'Exit to Main Menu'\n" +
-                "2. Click 'Load Game'\n" +
-                $"3. Select '{saveName}'\n" +
-                "4. Once loaded, press K to rejoin co-op\n\n" +
-                $"Server: {lastAddress}\n\n" +
-                "You will see all NPCs, settlements, and world state from the host!",
-                true,
-                false,
-                "Got it!",
-                "",
-                null,
-                null
-            );
+            // If downloading from main menu, use the complete handler
+            if (module.IsDownloadingSave)
+            {
+                // Show dialog for main menu flow
+                var inquiry = new InquiryData(
+                    "Save Downloaded!",
+                    $"The host's save file has been downloaded:\n'{saveName}'\n\n" +
+                    "To join the game:\n\n" +
+                    "1. Click 'Load Game' on the main menu\n" +
+                    $"2. Select '{saveName}'\n\n" +
+                    "You will automatically connect when the game loads!",
+                    true,
+                    false,
+                    "OK",
+                    "",
+                    null,
+                    null
+                );
+                InformationManager.ShowInquiry(inquiry, true);
 
-            InformationManager.ShowInquiry(inquiry, true);
+                // Disconnect and prepare for auto-reconnect
+                module.OnSaveDownloadComplete(saveName);
+            }
+            else
+            {
+                // In-game sync (legacy flow)
+                module.PendingCoopSaveToLoad = saveName;
+
+                var inquiry = new InquiryData(
+                    "World Sync Complete!",
+                    $"The host's save file has been downloaded:\n'{saveName}'\n\n" +
+                    "To complete the sync:\n\n" +
+                    "1. Press ESC and click 'Exit to Main Menu'\n" +
+                    "2. Click 'Load Game'\n" +
+                    $"3. Select '{saveName}'\n\n" +
+                    "You will automatically connect when the game loads!",
+                    true,
+                    false,
+                    "Got it!",
+                    "",
+                    null,
+                    null
+                );
+                InformationManager.ShowInquiry(inquiry, true);
+            }
         }
         catch (Exception ex)
         {

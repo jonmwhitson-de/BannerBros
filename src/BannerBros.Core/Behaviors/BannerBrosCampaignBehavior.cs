@@ -107,11 +107,18 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
                                 SendCampaignReadyToHost();
                             }
                         }
+                        else if (!string.IsNullOrEmpty(module.PendingCoopSaveToLoad))
+                        {
+                            // Auto-reconnect after loading co-op save
+                            BannerBrosModule.LogMessage($"Auto-reconnecting after loading save: {module.PendingCoopSaveToLoad}");
+                            AutoReconnectToHost();
+                        }
                         else if (!_joinPopupShown)
                         {
-                            // Not connected - show join popup
+                            // Not connected - show join popup (optional)
                             _joinPopupShown = true;
-                            ShowJoinCoopPopup();
+                            // Don't show popup - user can use Join Co-op from menu
+                            // ShowJoinCoopPopup();
                         }
                     }
                 }
@@ -164,6 +171,51 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
         catch (Exception ex)
         {
             BannerBrosModule.LogMessage($"OnTick error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Automatically reconnects to the host after loading the co-op save file.
+    /// </summary>
+    private void AutoReconnectToHost()
+    {
+        try
+        {
+            var module = BannerBrosModule.Instance;
+            if (module == null) return;
+
+            var lastAddress = module.Config.LastServerAddress;
+            if (string.IsNullOrEmpty(lastAddress))
+            {
+                BannerBrosModule.LogMessage("AutoReconnect: No saved server address");
+                module.PendingCoopSaveToLoad = null;
+                return;
+            }
+
+            // Parse address
+            var parts = lastAddress.Split(':');
+            var address = parts[0];
+            var port = parts.Length > 1 && int.TryParse(parts[1], out var p)
+                ? p
+                : module.Config.DefaultPort;
+
+            BannerBrosModule.LogMessage($"AutoReconnect: Connecting to {address}:{port}...");
+
+            // Show connecting message
+            InformationManager.DisplayMessage(new InformationMessage(
+                $"[Co-op] Connecting to {address}...",
+                Color.FromUint(0xFF00FF00)));
+
+            // Join the session
+            module.JoinSession(address, port);
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"AutoReconnect error: {ex.Message}");
+            if (BannerBrosModule.Instance != null)
+            {
+                BannerBrosModule.Instance.PendingCoopSaveToLoad = null;
+            }
         }
     }
 
