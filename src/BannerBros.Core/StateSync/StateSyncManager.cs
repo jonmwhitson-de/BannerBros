@@ -608,6 +608,7 @@ public class StateSyncManager
     private Dictionary<string, MobileParty> _partyLookupCache = new();
     private int _cacheRefreshCounter = 0;
     private const int CacheRefreshInterval = 10; // Refresh every 10 batches
+    private const int MaxCreationsPerBatch = 10; // Limit party creation per batch to avoid crashes
 
     /// <summary>
     /// Handle incoming world party batch from server.
@@ -766,13 +767,22 @@ public class StateSyncManager
                 else
                 {
                     // Party doesn't exist locally - create a shadow party for it
-                    var shadowParty = CreateShadowPartyForNPC(partyData);
-                    if (shadowParty != null)
+                    // Limit creations per batch to avoid overwhelming the game
+                    if (created < MaxCreationsPerBatch)
                     {
-                        created++;
+                        var shadowParty = CreateShadowPartyForNPC(partyData);
+                        if (shadowParty != null)
+                        {
+                            created++;
+                        }
+                        else
+                        {
+                            notFound++;
+                        }
                     }
                     else
                     {
+                        // Skip this party for now, will be created in a future batch
                         notFound++;
                     }
                 }
