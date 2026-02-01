@@ -766,25 +766,10 @@ public class StateSyncManager
                 }
                 else
                 {
-                    // Party doesn't exist locally - create a shadow party for it
-                    // Limit creations per batch to avoid overwhelming the game
-                    if (created < MaxCreationsPerBatch)
-                    {
-                        var shadowParty = CreateShadowPartyForNPC(partyData);
-                        if (shadowParty != null)
-                        {
-                            created++;
-                        }
-                        else
-                        {
-                            notFound++;
-                        }
-                    }
-                    else
-                    {
-                        // Skip this party for now, will be created in a future batch
-                        notFound++;
-                    }
+                    // Party doesn't exist locally - skip creation for now
+                    // Creating shadow parties causes crashes, so just count as not found
+                    // They will sync naturally when the client's campaign has the same parties
+                    notFound++;
                 }
             }
             catch
@@ -795,9 +780,9 @@ public class StateSyncManager
 
         // Log every batch for debugging
         _batchLogCounter++;
-        if (_batchLogCounter % 5 == 1 || created > 0) // Log every 5th batch or when creating
+        if (_batchLogCounter % 5 == 1) // Log every 5th batch
         {
-            BannerBrosModule.LogMessage($"[StateSync] Batch #{_batchLogCounter}: {updated} updated, {created} created, {notFound} failed, {packet.PartyCount} from host");
+            BannerBrosModule.LogMessage($"[StateSync] Batch #{_batchLogCounter}: {updated} updated, {notFound} not synced, {packet.PartyCount} from host");
         }
     }
 
