@@ -861,7 +861,7 @@ public class StateSyncManager
             try
             {
                 var currentPos = party.GetPosition2D;
-                var distance = Vec2.Distance(currentPos, targetPos);
+                var distance = (targetPos - currentPos).Length;
 
                 // If very close, snap to target
                 if (distance < 0.1f)

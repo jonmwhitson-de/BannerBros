@@ -3377,7 +3377,7 @@ public class SessionManager
                 PlayerId = _playerManager.LocalPlayerId,
                 Success = true
             };
-            NetworkManager.Instance?.SendToHost(receivedPacket);
+            NetworkManager.Instance?.SendToServer(receivedPacket);
 
             // Clean up
             _receivingSaveFile.Dispose();
@@ -3397,7 +3397,7 @@ public class SessionManager
                 Success = false,
                 ErrorMessage = ex.Message
             };
-            NetworkManager.Instance?.SendToHost(receivedPacket);
+            NetworkManager.Instance?.SendToServer(receivedPacket);
         }
     }
 
@@ -3516,7 +3516,7 @@ public class SessionManager
         {
             PlayerId = _playerManager.LocalPlayerId
         };
-        NetworkManager.Instance?.SendToHost(packet);
+        NetworkManager.Instance?.SendToServer(packet);
     }
 
     #endregion
