@@ -13,7 +13,8 @@ namespace BannerBros.Core.Patches;
 public static class PartyAIPatches
 {
     /// <summary>
-    /// Checks if a party belongs to a protected co-op player.
+    /// Checks if a party belongs to a protected co-op player or is a shadow party.
+    /// Shadow parties are always protected to prevent encounter crashes.
     /// </summary>
     public static bool IsPartyProtected(MobileParty? party)
     {
@@ -24,11 +25,20 @@ public static class PartyAIPatches
 
         try
         {
+            var partyId = party.StringId;
+
+            // Shadow parties are ALWAYS protected to prevent encounter crashes
+            // These are client-side representations of remote players
+            if (IsShadowParty(partyId))
+            {
+                return true;
+            }
+
             // Check if this party belongs to any connected player who is protected
             // ToList() to avoid collection modified exception
             foreach (var player in module.PlayerManager.Players.Values.ToList())
             {
-                if (player.PartyId == party.StringId)
+                if (player.PartyId == partyId)
                 {
                     return IsPlayerProtected(player);
                 }
@@ -38,6 +48,26 @@ public static class PartyAIPatches
         {
             // Ignore errors during iteration - defensive for Harmony patches
         }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a party ID indicates it's a shadow party (remote player representation).
+    /// Shadow parties have minimal components and will crash if encounters are triggered.
+    /// </summary>
+    public static bool IsShadowParty(string? partyId)
+    {
+        if (string.IsNullOrEmpty(partyId)) return false;
+
+        // remote_player_party - host's party visible on client
+        if (partyId.StartsWith("remote_player_")) return true;
+
+        // coop_party_* - client representation parties on host
+        if (partyId.StartsWith("coop_party_")) return true;
+
+        // shadow_* - generic shadow party prefix
+        if (partyId.StartsWith("shadow_")) return true;
 
         return false;
     }
@@ -137,7 +167,7 @@ public static class PartyAIPatches
 
 /// <summary>
 /// Patches for party encounter prevention.
-/// Stops map encounters with protected parties.
+/// Stops map encounters with protected parties and shadow parties.
 /// </summary>
 public static class EncounterPatches
 {
@@ -151,16 +181,21 @@ public static class EncounterPatches
         {
             try
             {
-                // Check if either party is a protected player
+                // Check if either party is a protected player or shadow party
                 if (PartyAIPatches.IsPartyProtected(other))
                 {
-                    BannerBrosModule.LogMessage($"Cannot engage - player is protected");
                     return false;
                 }
 
                 // Also prevent the encounter if WE are the protected party
-                // (shouldn't happen but defensive check)
                 if (PartyAIPatches.IsPartyProtected(__instance))
+                {
+                    return false;
+                }
+
+                // Additional safety: block if either party is a shadow party by ID
+                if (PartyAIPatches.IsShadowParty(__instance?.StringId) ||
+                    PartyAIPatches.IsShadowParty(other?.StringId))
                 {
                     return false;
                 }
@@ -173,7 +208,14 @@ public static class EncounterPatches
             return true;
         }
     }
+
+    // Note: Removed CheckPartyNeedsUpdatePatch and MobilePartyAiHourlyTickPatch
+    // as they may target non-existent methods and cause Harmony issues.
+    // Core encounter protection is in StartEncounterPatch above.
 }
+
+// Note: Removed ShadowPartyProtectionPatches (IsActivePatch, PartyComponentPatch) as they
+// may interfere with normal party operations. The core protection is in EncounterPatches.
 
 /// <summary>
 /// Patches for player state detection.

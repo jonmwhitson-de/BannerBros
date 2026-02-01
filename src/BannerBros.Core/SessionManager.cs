@@ -3020,8 +3020,38 @@ public class SessionManager
             // Make visible on map
             try { party.IsVisible = true; } catch { }
 
-            // Disable AI
-            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+            // Disable AI completely to prevent any interactions
+            try
+            {
+                party.Ai?.SetDoNotMakeNewDecisions(true);
+                party.Ai?.DisableAi();
+            }
+            catch { }
+
+            // Set a clan to prevent null reference crashes during faction checks
+            try
+            {
+                var playerClan = Clan.PlayerClan;
+                if (playerClan != null)
+                {
+                    party.ActualClan = playerClan;
+                }
+            }
+            catch { }
+
+            // Add a minimal member roster to prevent empty party crashes
+            try
+            {
+                if (party.MemberRoster != null && party.MemberRoster.TotalManCount == 0)
+                {
+                    var basicTroop = CharacterObject.All.FirstOrDefault(c => c.IsBasicTroop && !c.IsHero);
+                    if (basicTroop != null)
+                    {
+                        party.MemberRoster.AddToCounts(basicTroop, 1);
+                    }
+                }
+            }
+            catch { }
 
             // Set party name if possible
             try

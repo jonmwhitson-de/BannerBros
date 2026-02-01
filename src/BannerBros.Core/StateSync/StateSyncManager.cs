@@ -480,8 +480,38 @@ public class StateSyncManager
             // Make visible on map
             try { party.IsVisible = true; } catch { }
 
-            // Disable AI
-            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+            // Disable AI completely
+            try
+            {
+                party.Ai?.SetDoNotMakeNewDecisions(true);
+                party.Ai?.DisableAi();
+            }
+            catch { }
+
+            // Set a clan to prevent null reference crashes
+            try
+            {
+                var playerClan = Clan.PlayerClan;
+                if (playerClan != null)
+                {
+                    party.ActualClan = playerClan;
+                }
+            }
+            catch { }
+
+            // Add a minimal member roster to prevent empty party crashes
+            try
+            {
+                if (party.MemberRoster != null && party.MemberRoster.TotalManCount == 0)
+                {
+                    var basicTroop = CharacterObject.All.FirstOrDefault(c => c.IsBasicTroop && !c.IsHero);
+                    if (basicTroop != null)
+                    {
+                        party.MemberRoster.AddToCounts(basicTroop, 1);
+                    }
+                }
+            }
+            catch { }
 
             // Track the shadow party
             _shadowParties[partyId] = party;
@@ -684,6 +714,15 @@ public class StateSyncManager
             {
                 if (string.IsNullOrEmpty(partyData.Id)) continue;
 
+                // Skip coop_party_ IDs - these are client representations on host, not real parties
+                if (partyData.Id.StartsWith("coop_party_")) continue;
+
+                // Skip remote_player_ IDs - these are shadow parties we create
+                if (partyData.Id.StartsWith("remote_player_")) continue;
+
+                // Skip shadow_ IDs
+                if (partyData.Id.StartsWith("shadow_")) continue;
+
                 // Handle host's player_party - create as remote_player_party
                 if (partyData.Id == localMainPartyId && partyData.T == 4)
                 {
@@ -784,8 +823,39 @@ public class StateSyncManager
             // Make visible
             try { party.IsVisible = true; } catch { }
 
-            // Disable AI
-            try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
+            // Disable AI completely - prevent any AI-driven behavior
+            try
+            {
+                party.Ai?.SetDoNotMakeNewDecisions(true);
+                party.Ai?.DisableAi();
+            }
+            catch { }
+
+            // Set a clan to prevent null reference crashes during faction checks
+            try
+            {
+                var playerClan = Clan.PlayerClan;
+                if (playerClan != null)
+                {
+                    party.ActualClan = playerClan;
+                }
+            }
+            catch { }
+
+            // Add a minimal member roster to prevent empty roster crashes
+            try
+            {
+                if (party.MemberRoster != null && party.MemberRoster.TotalManCount == 0)
+                {
+                    // Try to add a basic troop to prevent empty party crashes
+                    var basicTroop = CharacterObject.All.FirstOrDefault(c => c.IsBasicTroop && !c.IsHero);
+                    if (basicTroop != null)
+                    {
+                        party.MemberRoster.AddToCounts(basicTroop, 1);
+                    }
+                }
+            }
+            catch { }
 
             // Set name if provided
             if (!string.IsNullOrEmpty(data.N))
