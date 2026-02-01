@@ -276,6 +276,14 @@ public class BannerBrosModule : MBSubModuleBase
         StateSyncManager.Instance.Initialize(isServer: false);
         ClientBlockingPatches.SetClientMode(true);
 
+        // If reconnecting after loading host's save, reset sync state
+        if (!string.IsNullOrEmpty(PendingCoopSaveToLoad))
+        {
+            LogMessage($"JoinSession: Reconnecting after loading save '{PendingCoopSaveToLoad}'");
+            StateSyncManager.Instance.ResetForReconnection();
+            PendingCoopSaveToLoad = null; // Clear the pending save flag
+        }
+
         LogMessage("JoinSession: Connecting to server...");
         NetworkManager.Instance.Connect(address, port);
         IsConnected = true;

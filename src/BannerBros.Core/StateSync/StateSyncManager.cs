@@ -142,6 +142,38 @@ public class StateSyncManager
     }
 
     /// <summary>
+    /// Reset sync state for reconnection after loading a save.
+    /// Forces cache refresh and resets batch tracking.
+    /// Call this when client reconnects after loading host's save file.
+    /// </summary>
+    public void ResetForReconnection()
+    {
+        BannerBrosModule.LogMessage("[StateSync] Resetting for reconnection...");
+
+        // Clear cached data - will be rebuilt from fresh campaign
+        _partyLookupCache.Clear();
+        _cacheRefreshCounter = 0;
+
+        // Reset batch tracking
+        _lastBatchSequence = -1;
+        _batchLogCounter = 0;
+
+        // Don't hide local parties - they should match host after save load
+        _localPartiesHidden = false;
+
+        // Clear shadow parties - we'll recreate if needed
+        _shadowParties.Clear();
+
+        // Clear pending updates
+        _pendingUpdates.Clear();
+
+        // Force immediate cache refresh on next batch
+        RefreshPartyLookupCache();
+
+        BannerBrosModule.LogMessage($"[StateSync] Reset complete. Cache has {_partyLookupCache.Count} parties ready for sync.");
+    }
+
+    /// <summary>
     /// Register a party for state synchronization.
     /// </summary>
     public void RegisterParty(MobileParty party)
