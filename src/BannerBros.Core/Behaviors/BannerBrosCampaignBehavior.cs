@@ -154,6 +154,8 @@ public class BannerBrosCampaignBehavior : CampaignBehaviorBase
             if (!module.IsHost)
             {
                 StateSyncManager.Instance.ApplyPendingUpdates();
+                // Smooth interpolation for party positions (every frame)
+                StateSyncManager.Instance.UpdatePartyInterpolation(dt);
             }
 
             // Ensure all co-op player parties are visible on the map

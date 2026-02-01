@@ -136,6 +136,7 @@ public class StateSyncManager
         _localPartiesHidden = false;
         _lastBatchSequence = -1;
         _partyLookupCache.Clear();
+        _partyTargetPositions.Clear();
         _cacheRefreshCounter = 0;
 
         BannerBrosModule.LogMessage("[StateSync] Cleaned up");
@@ -164,8 +165,9 @@ public class StateSyncManager
         // Clear shadow parties - we'll recreate if needed
         _shadowParties.Clear();
 
-        // Clear pending updates
+        // Clear pending updates and interpolation targets
         _pendingUpdates.Clear();
+        _partyTargetPositions.Clear();
 
         // Force immediate cache refresh on next batch
         RefreshPartyLookupCache();
@@ -642,6 +644,10 @@ public class StateSyncManager
     private const int CacheRefreshInterval = 10; // Refresh every 10 batches
     private const int MaxCreationsPerBatch = 10; // Limit party creation per batch to avoid crashes
 
+    // Interpolation for smooth movement
+    private Dictionary<string, Vec2> _partyTargetPositions = new();
+    private const float InterpolationSpeed = 8.0f; // Units per second - adjust for smoothness
+
     /// <summary>
     /// Handle incoming world party batch from server.
     /// Packets may arrive in multiple chunks to stay under network size limits.
@@ -790,8 +796,8 @@ public class StateSyncManager
 
                 if (party != null)
                 {
-                    // Update existing party's position directly
-                    SetPartyPosition(party, partyData.X, partyData.Y);
+                    // Store target position for smooth interpolation
+                    _partyTargetPositions[partyData.Id] = new Vec2(partyData.X, partyData.Y);
                     party.IsVisible = partyData.V;
                     try { party.Ai?.SetDoNotMakeNewDecisions(true); } catch { }
                     updated++;
@@ -815,6 +821,79 @@ public class StateSyncManager
         if (_batchLogCounter % 5 == 1) // Log every 5th batch
         {
             BannerBrosModule.LogMessage($"[StateSync] Batch #{_batchLogCounter}: {updated} updated, {notFound} not synced, {packet.PartyCount} from host");
+        }
+    }
+
+    /// <summary>
+    /// Update party positions with smooth interpolation.
+    /// Call this every frame from campaign behavior tick.
+    /// </summary>
+    public void UpdatePartyInterpolation(float deltaTime)
+    {
+        if (_isServer) return; // Only clients need interpolation
+        if (Campaign.Current == null) return;
+        if (_partyTargetPositions.Count == 0) return;
+
+        var localMainPartyId = MobileParty.MainParty?.StringId;
+        var toRemove = new List<string>();
+
+        foreach (var kvp in _partyTargetPositions)
+        {
+            var partyId = kvp.Key;
+            var targetPos = kvp.Value;
+
+            // Skip our own party
+            if (partyId == localMainPartyId) continue;
+
+            // Find the party
+            MobileParty? party = null;
+            if (!_partyLookupCache.TryGetValue(partyId, out party))
+            {
+                _shadowParties.TryGetValue(partyId, out party);
+            }
+
+            if (party == null)
+            {
+                toRemove.Add(partyId);
+                continue;
+            }
+
+            try
+            {
+                var currentPos = party.GetPosition2D;
+                var distance = Vec2.Distance(currentPos, targetPos);
+
+                // If very close, snap to target
+                if (distance < 0.1f)
+                {
+                    SetPartyPosition(party, targetPos.x, targetPos.y);
+                    continue;
+                }
+
+                // If too far (teleport case), snap immediately
+                if (distance > 50f)
+                {
+                    SetPartyPosition(party, targetPos.x, targetPos.y);
+                    continue;
+                }
+
+                // Smoothly interpolate toward target
+                var moveDistance = InterpolationSpeed * deltaTime;
+                var t = Math.Min(1.0f, moveDistance / distance);
+                var newPos = Vec2.Lerp(currentPos, targetPos, t);
+
+                SetPartyPosition(party, newPos.x, newPos.y);
+            }
+            catch
+            {
+                // Skip on error
+            }
+        }
+
+        // Clean up parties that no longer exist
+        foreach (var id in toRemove)
+        {
+            _partyTargetPositions.Remove(id);
         }
     }
 
