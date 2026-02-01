@@ -637,6 +637,13 @@ public class StateSyncManager
             }
             _lastBatchSequence = packet.SequenceNumber;
 
+            // Hide local NPC parties on first batch so only host's parties are visible
+            if (!_localPartiesHidden)
+            {
+                _localPartiesHidden = true;
+                HideAllLocalNpcParties();
+            }
+
             ApplyWorldPartyBatch(packet);
         }
         catch (Exception ex)
@@ -758,9 +765,16 @@ public class StateSyncManager
                 }
                 else
                 {
-                    // Party doesn't exist locally - skip for now (don't create shadows for NPCs)
-                    // This keeps things performant. NPCs should already exist from loaded campaign.
-                    notFound++;
+                    // Party doesn't exist locally - create a shadow party for it
+                    var shadowParty = CreateShadowPartyForNPC(partyData);
+                    if (shadowParty != null)
+                    {
+                        created++;
+                    }
+                    else
+                    {
+                        notFound++;
+                    }
                 }
             }
             catch
@@ -771,9 +785,99 @@ public class StateSyncManager
 
         // Log every batch for debugging
         _batchLogCounter++;
-        if (_batchLogCounter % 5 == 1) // Log every 5th batch to reduce spam
+        if (_batchLogCounter % 5 == 1 || created > 0) // Log every 5th batch or when creating
         {
-            BannerBrosModule.LogMessage($"[StateSync] Batch #{_batchLogCounter}: {updated} updated, {notFound} not found, {packet.PartyCount} from host");
+            BannerBrosModule.LogMessage($"[StateSync] Batch #{_batchLogCounter}: {updated} updated, {created} created, {notFound} failed, {packet.PartyCount} from host");
+        }
+    }
+
+    /// <summary>
+    /// Creates a shadow party for an NPC (bandit, lord, caravan, etc.) from host.
+    /// </summary>
+    private MobileParty? CreateShadowPartyForNPC(PartyPositionData data)
+    {
+        try
+        {
+            if (Campaign.Current == null || string.IsNullOrEmpty(data.Id)) return null;
+
+            // Create the shadow party
+            var party = MobileParty.CreateParty(data.Id, null);
+            if (party == null) return null;
+
+            // Set position
+            SetPartyPosition(party, data.X, data.Y);
+
+            // Make visible
+            try { party.IsVisible = data.V; } catch { }
+
+            // Disable AI completely
+            try
+            {
+                party.Ai?.SetDoNotMakeNewDecisions(true);
+                party.Ai?.DisableAi();
+            }
+            catch { }
+
+            // Set a clan if we have faction info
+            try
+            {
+                if (!string.IsNullOrEmpty(data.F))
+                {
+                    var faction = Campaign.Current.Factions.FirstOrDefault(f => f.StringId == data.F);
+                    if (faction is Clan clan)
+                    {
+                        party.ActualClan = clan;
+                    }
+                }
+                else
+                {
+                    // Default to player clan for bandits etc
+                    var playerClan = Clan.PlayerClan;
+                    if (playerClan != null)
+                    {
+                        party.ActualClan = playerClan;
+                    }
+                }
+            }
+            catch { }
+
+            // Add troops based on party size
+            try
+            {
+                if (party.MemberRoster != null && data.S > 0)
+                {
+                    var basicTroop = CharacterObject.All.FirstOrDefault(c => c.IsBasicTroop && !c.IsHero);
+                    if (basicTroop != null)
+                    {
+                        party.MemberRoster.AddToCounts(basicTroop, Math.Min(data.S, 10)); // Cap at 10 for performance
+                    }
+                }
+            }
+            catch { }
+
+            // Set name if provided
+            if (!string.IsNullOrEmpty(data.N))
+            {
+                try
+                {
+                    var nameProp = party.GetType().GetProperty("Name");
+                    if (nameProp?.CanWrite == true)
+                    {
+                        nameProp.SetValue(party, new TextObject(data.N));
+                    }
+                }
+                catch { }
+            }
+
+            // Track the shadow party
+            _shadowParties[data.Id] = party;
+            _partyLookupCache[data.Id] = party;
+
+            return party;
+        }
+        catch
+        {
+            return null;
         }
     }
 
