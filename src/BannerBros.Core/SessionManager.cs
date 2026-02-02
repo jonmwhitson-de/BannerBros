@@ -3314,8 +3314,8 @@ public class SessionManager
                 }
             }
 
-            // Try to find the save file with retries (save can take time)
-            var saveFile = FindSaveFileWithRetry(saveName, maxRetries: 10, delayMs: 500);
+            // Try to find the save file with retries (save can take 5+ seconds)
+            var saveFile = FindSaveFileWithRetry(saveName, maxRetries: 20, delayMs: 500);
             if (saveFile == null)
             {
                 BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Could not find save file after retries");
