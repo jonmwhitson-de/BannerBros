@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using HarmonyLib;
+using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Library;
 using BannerBros.Core.StateSync;
@@ -220,6 +222,71 @@ public static class ClientBlockingPatches
             }
 
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Block clients from starting encounters directly.
+    /// Encounters cause crashes because client's local NPC state differs from host.
+    /// </summary>
+    [HarmonyPatch(typeof(EncounterManager), "StartPartyEncounter")]
+    public static class BlockClientEncounterPatch
+    {
+        public static bool Prefix(PartyBase attackerParty, PartyBase defenderParty)
+        {
+            if (!_isClient) return true;
+
+            try
+            {
+                // Block all encounters initiated by the client
+                // The host should handle encounters and sync the results
+                BannerBrosModule.LogMessage($"[ClientBlocking] Blocked encounter: {attackerParty?.Name} vs {defenderParty?.Name}");
+                BannerBrosModule.LogMessage("[ClientBlocking] Clients cannot start battles - host controls engagements");
+
+                // Show message to user
+                TaleWorlds.Library.InformationManager.DisplayMessage(
+                    new TaleWorlds.Library.InformationMessage(
+                        "Cannot engage in co-op - only host can initiate battles with NPCs",
+                        TaleWorlds.Library.Colors.Red));
+
+                return false; // Block the encounter
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"[ClientBlocking] Encounter patch error: {ex.Message}");
+            }
+
+            return false; // Block on error too - safer than crashing
+        }
+    }
+
+    /// <summary>
+    /// Block clients from creating PlayerEncounter directly.
+    /// </summary>
+    [HarmonyPatch(typeof(PlayerEncounter), "Start")]
+    public static class BlockClientPlayerEncounterPatch
+    {
+        public static bool Prefix()
+        {
+            if (!_isClient) return true;
+
+            try
+            {
+                BannerBrosModule.LogMessage("[ClientBlocking] Blocked PlayerEncounter.Start on client");
+
+                TaleWorlds.Library.InformationManager.DisplayMessage(
+                    new TaleWorlds.Library.InformationMessage(
+                        "Cannot start encounter in co-op - host controls world interactions",
+                        TaleWorlds.Library.Colors.Red));
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                BannerBrosModule.LogMessage($"[ClientBlocking] PlayerEncounter patch error: {ex.Message}");
+            }
+
+            return false;
         }
     }
 }
