@@ -29,8 +29,9 @@ public class TimeControlBehavior : CampaignBehaviorBase
 
             if (Campaign.Current == null) return;
 
-            // Check if client is in spectator mode - freeze time to prevent divergence
-            if (!module.IsHost && module.SpectatorModeManager?.IsSpectatorMode == true)
+            // CLIENTS: Always freeze time - they receive state from host
+            // Without this, client's own AI moves parties and fights against sync
+            if (!module.IsHost)
             {
                 FreezeClientTime();
                 return;
