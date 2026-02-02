@@ -3206,6 +3206,16 @@ public class SessionManager
     private int _receivedChunks = 0;
     private const int SaveChunkSize = 16384; // 16KB chunks
 
+    // Pending save transfer (non-blocking)
+    private class PendingSaveTransfer
+    {
+        public int PeerId;
+        public string SaveName = "";
+        public DateTime StartTime;
+        public int CheckCount;
+    }
+    private PendingSaveTransfer? _pendingSaveForClient;
+
     /// <summary>
     /// Gets the base path to Bannerlord's save folder.
     /// </summary>
@@ -3271,6 +3281,7 @@ public class SessionManager
 
     /// <summary>
     /// HOST: Handle request for save file from a client.
+    /// Non-blocking - queues the save and checks for completion on tick.
     /// </summary>
     private void HandleSaveFileRequest(SaveFileRequestPacket packet, int peerId)
     {
@@ -3280,104 +3291,142 @@ public class SessionManager
 
         try
         {
-            // First, save the current game
+            // Trigger the save (non-blocking)
             var saveName = $"coop_sync_{DateTime.Now:yyyyMMdd_HHmmss}";
-            BannerBrosModule.LogMessage($"[SaveTransfer] Saving game as: {saveName}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] Triggering save: {saveName}");
 
-            // Use Bannerlord's save system
             Campaign.Current?.SaveHandler?.SaveAs(saveName);
 
-            // Debug: Log what folders/files exist
-            var basePath = GetSaveFolder();
-            BannerBrosModule.LogMessage($"[SaveTransfer] Base save path: {basePath}");
-            BannerBrosModule.LogMessage($"[SaveTransfer] Base exists: {Directory.Exists(basePath)}");
-
-            if (Directory.Exists(basePath))
+            // Queue for async completion check
+            _pendingSaveForClient = new PendingSaveTransfer
             {
-                var subDirs = Directory.GetDirectories(basePath);
-                BannerBrosModule.LogMessage($"[SaveTransfer] Subfolders: {string.Join(", ", subDirs.Select(Path.GetFileName))}");
-
-                // List recent .sav files in each location
-                foreach (var dir in new[] { basePath }.Concat(subDirs))
-                {
-                    if (Directory.Exists(dir))
-                    {
-                        var recentSaves = Directory.GetFiles(dir, "*.sav")
-                            .OrderByDescending(f => File.GetLastWriteTime(f))
-                            .Take(3)
-                            .Select(f => $"{Path.GetFileName(f)} ({File.GetLastWriteTime(f):HH:mm:ss})");
-                        if (recentSaves.Any())
-                        {
-                            BannerBrosModule.LogMessage($"[SaveTransfer] {Path.GetFileName(dir)}: {string.Join(", ", recentSaves)}");
-                        }
-                    }
-                }
-            }
-
-            // Try to find the save file with retries (save can take 5+ seconds)
-            var saveFile = FindSaveFileWithRetry(saveName, maxRetries: 20, delayMs: 500);
-            if (saveFile == null)
-            {
-                BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Could not find save file after retries");
-                return;
-            }
-            BannerBrosModule.LogMessage($"[SaveTransfer] Found save at: {saveFile}");
-
-            // Read the save file
-            var saveData = File.ReadAllBytes(saveFile);
-            BannerBrosModule.LogMessage($"[SaveTransfer] Save file size: {saveData.Length} bytes");
-
-            // Calculate chunks
-            var totalChunks = (int)Math.Ceiling((double)saveData.Length / SaveChunkSize);
-
-            // Send start packet
-            var startPacket = new SaveFileStartPacket
-            {
-                SaveFileName = saveName,
-                TotalSize = saveData.Length,
-                TotalChunks = totalChunks,
-                SaveChecksum = ComputeChecksum(saveData)
+                PeerId = peerId,
+                SaveName = saveName,
+                StartTime = DateTime.Now,
+                CheckCount = 0
             };
-            NetworkManager.Instance?.SendTo(peerId, startPacket);
-            BannerBrosModule.LogMessage($"[SaveTransfer] Sent start packet: {totalChunks} chunks");
 
-            // Send chunks
-            for (int i = 0; i < totalChunks; i++)
-            {
-                var offset = i * SaveChunkSize;
-                var length = Math.Min(SaveChunkSize, saveData.Length - offset);
-                var chunkData = new byte[length];
-                Array.Copy(saveData, offset, chunkData, 0, length);
-
-                var chunkPacket = new SaveFileChunkPacket
-                {
-                    ChunkIndex = i,
-                    TotalChunks = totalChunks,
-                    Data = chunkData,
-                    DataLength = length
-                };
-                NetworkManager.Instance?.SendTo(peerId, chunkPacket);
-
-                // Small delay to prevent network congestion
-                if (i % 10 == 0)
-                {
-                    System.Threading.Thread.Sleep(10);
-                }
-            }
-
-            // Send complete packet
-            var completePacket = new SaveFileCompletePacket
-            {
-                SaveFileName = saveName,
-                SaveChecksum = ComputeChecksum(saveData)
-            };
-            NetworkManager.Instance?.SendTo(peerId, completePacket);
-            BannerBrosModule.LogMessage($"[SaveTransfer] Save file transfer complete");
+            BannerBrosModule.LogMessage($"[SaveTransfer] Save queued, will check for completion on tick");
         }
         catch (Exception ex)
         {
-            BannerBrosModule.LogMessage($"[SaveTransfer] ERROR sending save: {ex.Message}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Called from tick to check if pending save is ready and send it.
+    /// </summary>
+    public void ProcessPendingSaveTransfer()
+    {
+        if (_pendingSaveForClient == null) return;
+
+        var pending = _pendingSaveForClient;
+        pending.CheckCount++;
+
+        // Timeout after 30 seconds
+        if ((DateTime.Now - pending.StartTime).TotalSeconds > 30)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Save timed out after 30 seconds");
+            _pendingSaveForClient = null;
+            return;
+        }
+
+        // Only check every ~10 ticks to reduce I/O
+        if (pending.CheckCount % 10 != 0) return;
+
+        // Try to find the save file
+        var saveFile = FindSaveFile(pending.SaveName);
+        if (saveFile == null)
+        {
+            if (pending.CheckCount % 100 == 0) // Log every ~100 ticks
+            {
+                BannerBrosModule.LogMessage($"[SaveTransfer] Still waiting for save... ({(DateTime.Now - pending.StartTime).TotalSeconds:F1}s)");
+            }
+            return;
+        }
+
+        BannerBrosModule.LogMessage($"[SaveTransfer] Save found after {(DateTime.Now - pending.StartTime).TotalSeconds:F1}s: {saveFile}");
+
+        // Send the save file
+        try
+        {
+            SendSaveFileToClient(pending.PeerId, saveFile, pending.SaveName);
+        }
+        catch (Exception ex)
+        {
+            BannerBrosModule.LogMessage($"[SaveTransfer] ERROR sending: {ex.Message}");
+        }
+
+        _pendingSaveForClient = null;
+    }
+
+    /// <summary>
+    /// Find a save file by name (single check, no retries).
+    /// </summary>
+    private static string? FindSaveFile(string saveName)
+    {
+        var basePath = GetSaveFolder();
+        var fileName = saveName + ".sav";
+        var searchPaths = new[] { basePath, Path.Combine(basePath, "Native"), Path.Combine(basePath, "Sandbox") };
+
+        foreach (var searchPath in searchPaths)
+        {
+            if (!Directory.Exists(searchPath)) continue;
+            var fullPath = Path.Combine(searchPath, fileName);
+            if (File.Exists(fullPath)) return fullPath;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Send save file to client in chunks.
+    /// </summary>
+    private void SendSaveFileToClient(int peerId, string saveFile, string saveName)
+    {
+        var saveData = File.ReadAllBytes(saveFile);
+        BannerBrosModule.LogMessage($"[SaveTransfer] Save file size: {saveData.Length} bytes");
+
+        var totalChunks = (int)Math.Ceiling((double)saveData.Length / SaveChunkSize);
+
+        // Send start packet
+        var startPacket = new SaveFileStartPacket
+        {
+            SaveFileName = saveName,
+            TotalSize = saveData.Length,
+            TotalChunks = totalChunks,
+            SaveChecksum = ComputeChecksum(saveData)
+        };
+        NetworkManager.Instance?.SendTo(peerId, startPacket);
+        BannerBrosModule.LogMessage($"[SaveTransfer] Sent start packet: {totalChunks} chunks");
+
+        // Send chunks
+        for (int i = 0; i < totalChunks; i++)
+        {
+            var offset = i * SaveChunkSize;
+            var length = Math.Min(SaveChunkSize, saveData.Length - offset);
+            var chunkData = new byte[length];
+            Array.Copy(saveData, offset, chunkData, 0, length);
+
+            var chunkPacket = new SaveFileChunkPacket
+            {
+                ChunkIndex = i,
+                TotalChunks = totalChunks,
+                Data = chunkData,
+                DataLength = length
+            };
+            NetworkManager.Instance?.SendTo(peerId, chunkPacket);
+        }
+
+        // Send complete packet
+        var completePacket = new SaveFileCompletePacket
+        {
+            SaveFileName = saveName,
+            SaveChecksum = ComputeChecksum(saveData)
+        };
+        NetworkManager.Instance?.SendTo(peerId, completePacket);
+        BannerBrosModule.LogMessage($"[SaveTransfer] Save file transfer complete");
     }
 
     /// <summary>

@@ -107,6 +107,7 @@ public class BannerBrosModule : MBSubModuleBase
         if (IsHost && IsConnected)
         {
             SessionManager?.ProcessPendingJoinRequests();
+            SessionManager?.ProcessPendingSaveTransfer();
         }
     }
 
