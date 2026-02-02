@@ -3207,25 +3207,66 @@ public class SessionManager
     private const int SaveChunkSize = 16384; // 16KB chunks
 
     /// <summary>
-    /// Gets the path to Bannerlord's save folder.
+    /// Gets the base path to Bannerlord's save folder.
     /// </summary>
     private static string GetSaveFolder()
     {
-        // Bannerlord saves to "Game Saves" directly (not "Game Saves\Native")
-        var basePath = Path.Combine(
+        return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "Mount and Blade II Bannerlord",
             "Game Saves"
         );
+    }
 
-        // Check if Native subfolder exists and has saves (some versions use it)
-        var nativePath = Path.Combine(basePath, "Native");
-        if (Directory.Exists(nativePath) && Directory.GetFiles(nativePath, "*.sav").Length > 0)
+    /// <summary>
+    /// Search for a save file by name across all possible Bannerlord save locations.
+    /// </summary>
+    private static string? FindSaveFileWithRetry(string saveName, int maxRetries = 10, int delayMs = 500)
+    {
+        var basePath = GetSaveFolder();
+        var fileName = saveName + ".sav";
+
+        // Possible subfolders where Bannerlord might save
+        var searchPaths = new[] { basePath, Path.Combine(basePath, "Native"), Path.Combine(basePath, "Sandbox") };
+
+        for (int retry = 0; retry < maxRetries; retry++)
         {
-            return nativePath;
+            // Check each possible location
+            foreach (var searchPath in searchPaths)
+            {
+                if (!Directory.Exists(searchPath)) continue;
+
+                var fullPath = Path.Combine(searchPath, fileName);
+                if (File.Exists(fullPath))
+                {
+                    BannerBrosModule.LogMessage($"[SaveTransfer] Found save at: {fullPath} (retry {retry})");
+                    return fullPath;
+                }
+            }
+
+            // Also search recursively after a few retries
+            if (retry >= 3 && Directory.Exists(basePath))
+            {
+                try
+                {
+                    var files = Directory.GetFiles(basePath, fileName, SearchOption.AllDirectories);
+                    if (files.Length > 0)
+                    {
+                        BannerBrosModule.LogMessage($"[SaveTransfer] Found via recursive search: {files[0]}");
+                        return files[0];
+                    }
+                }
+                catch { /* Ignore search errors */ }
+            }
+
+            if (retry < maxRetries - 1)
+            {
+                BannerBrosModule.LogMessage($"[SaveTransfer] Save not found yet, waiting... (retry {retry + 1}/{maxRetries})");
+                System.Threading.Thread.Sleep(delayMs);
+            }
         }
 
-        return basePath;
+        return null;
     }
 
     /// <summary>
@@ -3246,18 +3287,14 @@ public class SessionManager
             // Use Bannerlord's save system
             Campaign.Current?.SaveHandler?.SaveAs(saveName);
 
-            // Wait a moment for save to complete
-            System.Threading.Thread.Sleep(500);
-
-            // Find the save file
-            var saveFolder = GetSaveFolder();
-            var saveFile = Path.Combine(saveFolder, saveName + ".sav");
-
-            if (!File.Exists(saveFile))
+            // Try to find the save file with retries (save can take time)
+            var saveFile = FindSaveFileWithRetry(saveName, maxRetries: 10, delayMs: 500);
+            if (saveFile == null)
             {
-                BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Save file not found: {saveFile}");
+                BannerBrosModule.LogMessage($"[SaveTransfer] ERROR: Could not find save file after retries");
                 return;
             }
+            BannerBrosModule.LogMessage($"[SaveTransfer] Found save at: {saveFile}");
 
             // Read the save file
             var saveData = File.ReadAllBytes(saveFile);
