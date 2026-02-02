@@ -3211,12 +3211,21 @@ public class SessionManager
     /// </summary>
     private static string GetSaveFolder()
     {
-        return Path.Combine(
+        // Bannerlord saves to "Game Saves" directly (not "Game Saves\Native")
+        var basePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "Mount and Blade II Bannerlord",
-            "Game Saves",
-            "Native"
+            "Game Saves"
         );
+
+        // Check if Native subfolder exists and has saves (some versions use it)
+        var nativePath = Path.Combine(basePath, "Native");
+        if (Directory.Exists(nativePath) && Directory.GetFiles(nativePath, "*.sav").Length > 0)
+        {
+            return nativePath;
+        }
+
+        return basePath;
     }
 
     /// <summary>
