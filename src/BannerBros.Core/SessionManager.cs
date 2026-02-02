@@ -3287,6 +3287,33 @@ public class SessionManager
             // Use Bannerlord's save system
             Campaign.Current?.SaveHandler?.SaveAs(saveName);
 
+            // Debug: Log what folders/files exist
+            var basePath = GetSaveFolder();
+            BannerBrosModule.LogMessage($"[SaveTransfer] Base save path: {basePath}");
+            BannerBrosModule.LogMessage($"[SaveTransfer] Base exists: {Directory.Exists(basePath)}");
+
+            if (Directory.Exists(basePath))
+            {
+                var subDirs = Directory.GetDirectories(basePath);
+                BannerBrosModule.LogMessage($"[SaveTransfer] Subfolders: {string.Join(", ", subDirs.Select(Path.GetFileName))}");
+
+                // List recent .sav files in each location
+                foreach (var dir in new[] { basePath }.Concat(subDirs))
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        var recentSaves = Directory.GetFiles(dir, "*.sav")
+                            .OrderByDescending(f => File.GetLastWriteTime(f))
+                            .Take(3)
+                            .Select(f => $"{Path.GetFileName(f)} ({File.GetLastWriteTime(f):HH:mm:ss})");
+                        if (recentSaves.Any())
+                        {
+                            BannerBrosModule.LogMessage($"[SaveTransfer] {Path.GetFileName(dir)}: {string.Join(", ", recentSaves)}");
+                        }
+                    }
+                }
+            }
+
             // Try to find the save file with retries (save can take time)
             var saveFile = FindSaveFileWithRetry(saveName, maxRetries: 10, delayMs: 500);
             if (saveFile == null)
